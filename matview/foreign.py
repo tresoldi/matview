@@ -58,7 +58,13 @@ if TYPE_CHECKING:
     from matview.store.base import Store
     from matview.types import DepEdge
 
-__all__ = ["check_declared_cycles", "load_manifest", "load_manifests", "run_foreign"]
+__all__ = [
+    "check_declared_cycles",
+    "load_manifest",
+    "load_manifests",
+    "run_foreign",
+    "substitute_key",
+]
 
 log = logging.getLogger("matview.foreign")
 
@@ -334,6 +340,11 @@ def run_foreign(
             log.warning("%s: job left at %s for reproduction", rec.name, workdir)
 
 
+def substitute_key(template: Mapping[str, Any], key: Mapping[str, Scalar]) -> dict[str, Any]:
+    """Resolve a declared input's key against the recipe's own key."""
+    return {field: _substitute(value, key) for field, value in template.items()}
+
+
 def _materialize(
     cache: Cache,
     ctx: Context,
@@ -342,7 +353,7 @@ def _materialize(
     key: Mapping[str, Scalar],
     workdir: Path,
 ) -> Path:
-    resolved_key = {field: _substitute(value, key) for field, value in declared.key.items()}
+    resolved_key = substitute_key(declared.key, key)
     data = ctx.get_bytes(declared.recipe, part=declared.part, **resolved_key)
     if not isinstance(data, bytes):
         raise ForeignRecipeError(

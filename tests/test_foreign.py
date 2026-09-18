@@ -19,7 +19,7 @@ from matview.foreign import load_manifest, load_manifests
 
 SCRIPT = """
 import json, sys
-job = json.loads(open(sys.argv[1]).read())
+with open(sys.argv[1]) as handle: job = json.load(handle)
 assert len(sys.argv) == 2, "the job file is the only argument"
 print("chatter on stdout that must not reach the cache")
 sys.stderr.write("chatter on stderr\\n")
@@ -369,3 +369,39 @@ def test_a_changed_source_without_a_version_bump_warns(
     assert cache.get("drift", dataset="x") == {"n": 1}, (
         "the hash is advisory and never fingerprinted, so it invalidates nothing"
     )
+
+
+def test_plan_walks_through_a_foreign_node_without_running_it(
+    tmp_path: Path, cache: Cache, registry: Registry
+) -> None:
+    """The declared graph is the privileged case, and this is the concrete payoff.
+
+    A Python recipe's dependencies are only knowable by running it, so a plan stops at
+    an absent one. A manifest says what the inputs are, so the plan sees the whole
+    subgraph on a completely cold cache.
+    """
+    ran = {"n": 0}
+
+    @recipe(version=1, codec="json", index=("dataset",), registry=registry)
+    def distance_matrix(ctx, *, dataset: str):
+        ran["n"] += 1
+        return {"rows": [[0, 1], [1, 0]]}
+
+    directory = write_recipe(
+        tmp_path,
+        "tree",
+        body='open(job["output"],"w").write("{}")',
+        manifest=manifest_for(
+            "tree",
+            inputs=(
+                '\n[[inputs]]\nname = "matrix"\nrecipe = "distance_matrix"\n'
+                'key = { dataset = "${dataset}" }\n'
+            ),
+        ),
+    )
+    load_manifests(directory, registry=registry)
+
+    report = cache.plan("tree", dataset="ie-ielex")
+    assert sorted(node.recipe for node in report.absent) == ["distance_matrix", "tree"]
+    assert ran["n"] == 0, "planning runs nothing, Python or foreign"
+    assert cache.query() == []

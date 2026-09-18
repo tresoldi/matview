@@ -3,11 +3,17 @@
 Source of truth: `docs/design-spec.md`. Interop contract: `SPEC.md`. Judgement calls
 where the spec is silent: `DECISIONS.md`.
 
+**Status: all stages complete.** What follows is the plan as built, kept for the
+reasoning rather than as a checklist. Two departures from the prescribed order are
+noted where they happened: the codec seam arrived with stage 2, because the scheduler
+cannot be tested without at least one codec, and stages 4 and 5 landed together,
+because the scheduler and the policy layer are not separable.
+
 The spec fixes the build order and requires that the ten hard rules get tests
 *before* the behaviour they constrain exists. Stage 0 is therefore a failing test
 suite, not scaffolding.
 
-## Stage 0 — invariant tests (write first, expect red)
+## Stage 0 — invariant tests (write first, expect red) ✔
 
 One test per hard rule, named after it, so a violation names itself in CI output.
 
@@ -24,7 +30,7 @@ One test per hard rule, named after it, so a violation names itself in CI output
 | 9 | Empty or `None` results are values, not misses | `test_rule09_empty_is_a_value` |
 | 10 | Never use pickle | `test_rule10_no_pickle_anywhere` (import + source scan) |
 
-## Stage 1 — canonicalization and fingerprints
+## Stage 1 — canonicalization and fingerprints ✔
 
 `matview/_canon.py`, `matview/_hash.py`. No I/O, no SQLite, pure functions.
 
@@ -38,7 +44,7 @@ Done when: property tests over scalar dicts, the float-normalization test, and
 golden vectors (fixed inputs → fixed hex digests, checked into the repo so a future
 refactor or a second-language port can be validated against them).
 
-## Stage 2 — schema and `SqliteStore`
+## Stage 2 — schema and `SqliteStore` ✔
 
 `matview/store/sqlite.py` plus the `Store` protocol in `matview/store/base.py`.
 
@@ -52,7 +58,7 @@ refactor or a second-language port can be validated against them).
 
 Done when: rules 1, 3 and 4 pass, including a simulated mid-write crash.
 
-## Stage 3 — registry and context
+## Stage 3 — registry and context ✔
 
 `matview/registry.py`, `matview/context.py`.
 
@@ -61,7 +67,7 @@ Done when: rules 1, 3 and 4 pass, including a simulated mid-write crash.
 - `Cache` is **not** global, one per store, connection per thread.
 - `ctx.get` records each resolved dependency into the context's collected set.
 
-## Stage 4 — scheduler
+## Stage 4 — scheduler ✔
 
 `matview/scheduler.py`. Plain recursion, explicit in-flight stack of
 `(recipe, key_hash, part)`; re-entry raises with the full path.
@@ -74,7 +80,7 @@ Done when: rules 1, 3 and 4 pass, including a simulated mid-write crash.
 Done when: cycle detection, the worked early-cutoff example asserted end to end,
 and stale-but-valid revalidation-without-recompute all pass.
 
-## Stage 5 — policy
+## Stage 5 — policy ✔
 
 `matview/policy.py`.
 
@@ -85,7 +91,7 @@ and stale-but-valid revalidation-without-recompute all pass.
   raise once with the full set attached. `plan()` is the same walk with computing off,
   reporting absent and stale separately.
 
-## Stage 6 — codecs
+## Stage 6 — codecs ✔
 
 `matview/codecs/`: `arrow` (Arrow IPC ↔ polars), `npy` (↔ numpy), `json` (↔ dict).
 Each an optional extra; the core installs with none of them.
@@ -99,7 +105,7 @@ Each an optional extra; the core installs with none of them.
   `get(..., part=...)` selects one and records a dep edge on that part alone.
   See `DECISIONS.md` D11, which closes a gap the spec left open.
 
-## Stage 7 — foreign recipes
+## Stage 7 — foreign recipes ✔
 
 `matview/foreign.py`. TOML manifest discovered by directory scan, registered as if a
 decorator had; dependencies declared upfront, so the graph is cycle-checkable before
@@ -108,7 +114,7 @@ never stdout; nonzero exit / missing / unparseable output is a failure and is no
 cached; the job file survives a failure for hand-reproduction; `deadline_s` enforced
 by killing the process.
 
-## Stage 8 — deliverables
+## Stage 8 — deliverables ✔
 
 - Two examples, one financial (OHLCV → SMA → Sharpe) and one not (distance matrix →
   tree), to keep domain assumptions out of the core.

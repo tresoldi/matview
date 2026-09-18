@@ -40,9 +40,7 @@ def test_parameters_colliding_with_policy_arguments_are_rejected(
 ) -> None:
     """They would be silently swallowed by the policy layer. See DECISIONS.md D18."""
     namespace: dict[str, object] = {}
-    exec(
-        f"def clash(ctx, *, {reserved}: str = 'x'):\n    return {{}}", namespace
-    )
+    exec(f"def clash(ctx, *, {reserved}: str = 'x'):\n    return {{}}", namespace)
     with pytest.raises(InvalidKey, match="collide with policy arguments"):
         recipe(version=1, codec="json", registry=registry)(namespace["clash"])
 

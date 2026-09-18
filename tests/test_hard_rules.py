@@ -11,9 +11,9 @@ import re
 from pathlib import Path
 
 import pytest
-from matview.codecs import CODEC_NAMES, CodecUnavailable, get_codec
 
 from matview import Cache, Registry, SqliteStore, recipe
+from matview.codecs import CODEC_NAMES, CodecUnavailable, get_codec
 from matview.errors import CodecError, MissingArtifacts
 from matview.fingerprint import fingerprint
 from matview.types import DepEdge
@@ -217,12 +217,19 @@ def test_rule06_on_miss_is_a_ceiling(cache: Cache, registry: Registry) -> None:
 # 7. Digests come from codec output; codecs must be byte-deterministic.
 # ---------------------------------------------------------------------------
 
-CODEC_SAMPLES: dict[str, object] = {
-    "json": {"b": 1, "a": [1, 2.5, None, True], "z": "ü"},
-    "npy": None,  # filled in below when numpy is importable
-    "arrow": None,
-    "arrow-series": None,
-}
+
+def _sample_for(codec_name: str) -> object:
+    """A representative value per codec, built lazily so an absent extra just skips."""
+    if codec_name == "json":
+        return {"b": 1, "a": [1, 2.5, None, True], "z": "ü", "nested": {"y": 1, "x": 2}}
+    if codec_name == "npy":
+        np = pytest.importorskip("numpy")
+        return np.arange(12, dtype="int64").reshape(3, 4)
+    if codec_name in {"arrow", "arrow-series"}:
+        pl = pytest.importorskip("polars")
+        frame = pl.DataFrame({"close": [1.0, 2.5, 3.0], "volume": [10, 20, 30]})
+        return frame["close"] if codec_name == "arrow-series" else frame
+    raise AssertionError(f"no sample defined for codec {codec_name!r}")
 
 
 @pytest.mark.parametrize("codec_name", sorted(CODEC_NAMES))
@@ -232,7 +239,7 @@ def test_rule07_codec_byte_determinism(codec_name: str) -> None:
     except CodecUnavailable:
         pytest.skip(f"{codec_name} extra not installed")
 
-    value = codec.sample_value()  # each codec supplies a representative value
+    value = _sample_for(codec_name)
     once = codec.encode(value)
     assert isinstance(once, bytes), "sample values are deliberately unpartitioned"
 

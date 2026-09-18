@@ -211,3 +211,19 @@ The spec asks the json codec to sort keys and pin float formatting. JCS does bot
 already a dependency for key hashing, and is specified well enough that another language
 produces the same bytes. Using it here rather than a second hand-tuned `json.dumps`
 configuration means one canonicalization to get right instead of two.
+
+## D23 — `NULL` parts are not covered by the schema's UNIQUE constraints
+
+`artifact` is `UNIQUE (recipe_id, key_hash, part)` and `task` is
+`UNIQUE (recipe, version, key_json, part)`, but SQLite treats `NULL`s as distinct in a
+unique index, so neither constraint actually covers an unpartitioned row. Two
+unpartitioned artifacts for the same `(recipe, key_hash)` would not collide.
+
+The schema is reproduced from the spec verbatim rather than being quietly corrected, so
+uniqueness for `NULL` parts is enforced in the write path: a `part IS ?` lookup before
+the upsert, and a `WHERE NOT EXISTS` guard on the task insert. Writers serialize on
+`BEGIN IMMEDIATE`, so select-then-write is safe across processes as well as threads.
+
+The alternative — adding `part TEXT NOT NULL DEFAULT ''` and using the empty string for
+unpartitioned values — would make the constraint do the work, but it changes a column the
+spec fixes, and `part` being `NULL` when unpartitioned is stated twice in the spec.

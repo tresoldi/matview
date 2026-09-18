@@ -14,6 +14,48 @@ The interoperability contract lives in ``SPEC.md`` and is versioned independentl
 of this package.
 """
 
-__all__ = ["__version__"]
+from matview.errors import (
+    ArtifactTooLarge,
+    CodecError,
+    CycleError,
+    DeadlineExceeded,
+    ForeignRecipeError,
+    InvalidKey,
+    MatviewError,
+    MissingArtifacts,
+    RecipeNotFound,
+)
+from matview.store import SqliteStore, Store
+from matview.types import (
+    Artifact,
+    ArtifactRef,
+    DepEdge,
+    MissingNode,
+    OnMiss,
+    PlanReport,
+    StoreResult,
+)
+
+__all__ = [
+    "Artifact",
+    "ArtifactRef",
+    "ArtifactTooLarge",
+    "CodecError",
+    "CycleError",
+    "DeadlineExceeded",
+    "DepEdge",
+    "ForeignRecipeError",
+    "InvalidKey",
+    "MatviewError",
+    "MissingArtifacts",
+    "MissingNode",
+    "OnMiss",
+    "PlanReport",
+    "RecipeNotFound",
+    "SqliteStore",
+    "Store",
+    "StoreResult",
+    "__version__",
+]
 
 __version__ = "0.0.0"

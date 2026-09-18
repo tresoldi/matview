@@ -2,6 +2,8 @@
 
 Materialized views for derived values.
 
+**Documentation: <https://tresoldi.github.io/matview/>**
+
 You declare *recipes*: functions that compute a value from parameters and from other
 recipes' outputs. You ask the cache for a value; it returns the stored one if it is
 current, and computes it if not, recursively resolving whatever that computation turns
@@ -96,6 +98,8 @@ uv run --extra npy   python examples/linguistics/pipeline.py    # a foreign reci
 | [`SPEC.md`](SPEC.md) | Canonicalization and fingerprints, verbatim and independently versioned. The cross-language interoperability contract. |
 | [`PLAN.md`](PLAN.md) | Build order, stage by stage, and the ten invariants with the test that pins each one. |
 | [`DECISIONS.md`](DECISIONS.md) | Every choice made where the spec was silent, with the reasoning. |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release notes. Note that `SPEC.md` is versioned separately and deliberately. |
+| [`ops/workflows/`](ops/workflows/) | Workflow files staged for installation under `.github/workflows/`. |
 
 `tests/golden_vectors.json` and `tests/golden_codecs.json` are fixed inputs to fixed
 digests. They are the regression guard on the interoperability contract and the
@@ -111,11 +115,21 @@ or append-only computation; point-in-time correctness; a web UI, daemon or serve
 ## Development
 
 ```bash
-uv run --all-extras pytest                 # with every codec
-uv run --extra dev --exact pytest          # and again with none, which must also pass
-uv run --all-extras ruff check . && uv run --all-extras ruff format --check .
-uv run --extra dev --exact mypy matview
+make install        # sync the venv with every extra
+make help           # what else there is
+make check          # everything CI runs: quality, both test passes, the codec floor
 ```
+
+`make test-core` runs the suite with no codec extras installed, which must pass too —
+the core is meant to install without them. `make codec-floor` re-checks the golden codec
+bytes against the oldest supported polars, pyarrow and numpy; a codec that drifts does
+not error, it just stops finding everything already stored.
+
+Install the git hooks once with `uv run --extra dev pre-commit install`. They run ruff,
+ruff-format and mypy at exactly the versions pinned in the `dev` extra.
+
+Documentation is MkDocs Material with an API reference generated from the docstrings:
+`make docs-serve` to preview, `make docs` to build it the way CI does (`--strict`).
 
 ## License
 

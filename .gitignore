@@ -14,3 +14,4 @@ htmlcov/
 *.db-wal
 *.db-shm
 uv.lock
+site/

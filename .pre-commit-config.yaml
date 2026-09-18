@@ -1,0 +1,42 @@
+# Run on every commit, so a formatting slip is caught before the push rather than by
+# a red CI run afterwards.
+#
+#     uv run --extra dev pre-commit install
+#
+# ruff and mypy are pinned to exactly the versions in the `dev` extra. Unpinned, the
+# hook and the local venv drift apart and the same code passes in one and fails in the
+# other, which is confusing in proportion to how rarely it happens.
+# SPEC.md and docs/design-spec.md are documents reproduced as given, not code. SPEC.md
+# in particular states in its own header that it is verbatim, and it is the contract a
+# second-language implementation is validated against. A whitespace hook quietly
+# editing either would make that claim false and add noise to any diff against the
+# source document, so they are out of scope for the fixers.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(SPEC\.md|docs/design-spec\.md)$
+      - id: end-of-file-fixer
+        exclude: ^(SPEC\.md|docs/design-spec\.md)$
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.1
+    hooks:
+      - id: mypy
+        files: ^matview/
+        additional_dependencies: ["rfc8785>=0.1.4"]

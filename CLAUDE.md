@@ -38,6 +38,14 @@ deliberate: it is what buys early cutoff. The comment in the code says so; leave
 ## Conventions
 
 - Python 3.11+, `uv` for environments, `ruff` for lint and format, `mypy --strict`.
-- Run before pushing: `uv run --all-extras ruff check . && uv run --all-extras ruff format --check . && uv run --extra dev mypy matview && uv run --all-extras pytest`.
-- The test suite must also pass with **no** codec extras installed; the core has to work
-  without them.
+- **Run `make check` before pushing.** It is what CI runs: `quality`, `test-core`,
+  `test-all`, `codec-floor`. `make help` lists the rest.
+- The commands live in the `Makefile` and CI calls those targets, so changing how
+  something is checked is an edit there — not an edit under `.github/workflows/`, which
+  needs a token scope this account does not have.
+- `make format-check` is not implied by `make lint`. Running `ruff check --fix` and
+  committing on the strength of it has broken CI here before; `make quality` runs both.
+- The test suite must also pass with **no** codec extras installed (`make test-core`);
+  the core has to work without them.
+- Docstrings are the API documentation: they are rendered by mkdocstrings into the
+  published reference, so they are read by users, not only by readers of the source.

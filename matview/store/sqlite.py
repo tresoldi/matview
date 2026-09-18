@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from os import PathLike
@@ -27,6 +28,11 @@ __all__ = ["SCHEMA_VERSION", "SqliteStore"]
 SCHEMA_VERSION: Final = 1
 
 DEFAULT_MAX_ARTIFACT_BYTES: Final = 64 * 1024 * 1024
+
+#: How long to wait for another writer before giving up. Duplicate computation by
+#: concurrent runners is expected; failing because one of them held the file for a
+#: moment is not.
+DEFAULT_BUSY_TIMEOUT_MS: Final = 10_000
 
 SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -103,9 +109,11 @@ class SqliteStore:
         path: str | PathLike[str],
         *,
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
+        busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
     ) -> None:
         self.path = str(path)
         self.max_artifact_bytes = max_artifact_bytes
+        self.busy_timeout_ms = busy_timeout_ms
         self._local = threading.local()
         self._init_lock = threading.Lock()
         self._initialized = False
@@ -119,15 +127,49 @@ class SqliteStore:
             return conn
         conn = sqlite3.connect(self.path, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
+        self._enable_wal(conn)
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 10000")
         self._local.conn = conn
         with self._init_lock:
             if not self._initialized:
                 self._create_schema(conn)
                 self._initialized = True
         return conn
+
+    def _enable_wal(self, conn: sqlite3.Connection) -> None:
+        """Switch the database to WAL, tolerating a concurrent opener.
+
+        Two processes opening the same *new* file at the same moment both try to make
+        this switch, and it needs a brief exclusive lock. `busy_timeout` does not cover
+        it: SQLite does not invoke the busy handler for a journal-mode change, so the
+        loser gets SQLITE_BUSY immediately however long the timeout is. That is not a
+        hypothetical — it is what the first run of the cross-process test did, and the
+        deployment the spec describes is exactly concurrent runners on one file.
+
+        The mode is a persistent property of the file, so this costs nothing after the
+        first successful switch: every later connection reads `wal` and returns.
+        """
+        if str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal":
+            return
+
+        deadline = time.monotonic() + self.busy_timeout_ms / 1000
+        while True:
+            try:
+                # The pragma reports the mode it ended up in, and can decline to change
+                # it without raising, so the return value is checked rather than the
+                # absence of an exception.
+                mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+                if str(mode).lower() == "wal":
+                    return
+            except sqlite3.OperationalError:
+                pass
+            if time.monotonic() >= deadline:
+                raise StoreError(
+                    f"{self.path}: could not switch to WAL within "
+                    f"{self.busy_timeout_ms} ms; another connection is holding it."
+                )
+            time.sleep(0.01)
 
     def _create_schema(self, conn: sqlite3.Connection) -> None:
         # executescript commits any open transaction before it runs, so the DDL cannot

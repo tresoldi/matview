@@ -44,3 +44,7 @@ Pre-implementation. The repository currently holds the design and the plan:
 | [`PLAN.md`](PLAN.md) | Build order, stage by stage, and the ten invariants with the test that pins each one. |
 | [`DECISIONS.md`](DECISIONS.md) | Every choice made where the spec was silent. |
 | [`docs/ci-workflow.yml`](docs/ci-workflow.yml) | The intended `.github/workflows/ci.yml`, not yet installed in place. |
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).

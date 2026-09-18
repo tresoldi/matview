@@ -95,6 +95,9 @@ Each an optional extra; the core installs with none of them.
 - Per codec: `encode(decode(encode(x))) == encode(x)` byte-for-byte, plus a
   cross-version check in CI.
 - A dict return means partitioned output; the scheduler treats `part` as opaque.
+- `decode_parts(dict[str, bytes])` merges a partitioned value for a whole read;
+  `get(..., part=...)` selects one and records a dep edge on that part alone.
+  See `DECISIONS.md` D11, which closes a gap the spec left open.
 
 ## Stage 7 — foreign recipes
 

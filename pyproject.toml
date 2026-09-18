@@ -9,6 +9,8 @@ description = "Materialized views for derived values: a content-addressed comput
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Tiago Tresoldi", email = "tresoldi@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["cache", "build-system", "dag", "memoization", "sqlite", "materialized-view"]
 classifiers = [
   "Development Status :: 3 - Alpha",

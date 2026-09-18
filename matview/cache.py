@@ -31,7 +31,13 @@ from typing import Any, Literal
 from matview.canon import Scalar, utf16_sort_key
 from matview.codecs import Codec, get_codec
 from matview.context import Context
-from matview.errors import CodecError, CycleError, MatviewError, MissingArtifacts
+from matview.errors import (
+    CodecError,
+    CycleError,
+    MatviewError,
+    MissingArtifacts,
+    RecipeNotFound,
+)
 from matview.fingerprint import canonical_key_hash, digest_bytes, fingerprint
 from matview.policy import Policy
 from matview.registry import REGISTRY, Recipe, Registry
@@ -281,6 +287,12 @@ class Cache:
 
         if walk.mode == "plan":
             if not rows:
+                # A Python recipe's dependencies are only knowable by running it, so an
+                # absent one is where the walk stops. A foreign recipe declares its
+                # inputs, so the walk goes through it — which is the concrete payoff of
+                # the spec calling the declared graph the privileged case.
+                if rec.foreign is not None:
+                    self._walk_declared_inputs(walk, rec, key, policy)
                 self._record_missing(walk, rec, key, part, effective)
                 raise _Blocked
             return self._memoize(walk, node, rows)
@@ -452,6 +464,25 @@ class Cache:
             if recomputed != row.fingerprint:
                 current = False
         return current
+
+    def _walk_declared_inputs(
+        self, walk: _Walk, rec: Recipe, key: Mapping[str, Scalar], policy: Policy
+    ) -> None:
+        """Plan mode: follow a foreign recipe's manifest without invoking anything."""
+        from matview.foreign import substitute_key
+
+        assert rec.foreign is not None
+        for declared in rec.foreign.inputs:
+            with contextlib.suppress(_Blocked, RecipeNotFound):
+                dep = self.registry.get(declared.recipe)
+                self._resolve(
+                    walk,
+                    dep,
+                    dep.bind(substitute_key(declared.key, key)),
+                    declared.part,
+                    force=False,
+                    policy=policy,
+                )
 
     def _walk_stored_deps(self, walk: _Walk, rows: Sequence[Artifact], policy: Policy) -> None:
         """Plan mode: follow what a node read last time, to report the whole subgraph."""

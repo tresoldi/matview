@@ -1,0 +1,20 @@
+# A foreign recipe. The host reads this at startup and registers it exactly as if a
+# decorator had, without needing the recipe's language installed.
+name = "phylo_tree"
+version = 2
+codec = "json"
+deterministic = false
+index = ["dataset"]
+command = ["python3", "phylo_tree.py"]
+source = "phylo_tree.py"          # hashed into source_hash; advisory, never fingerprinted
+
+[params]
+dataset = { type = "string" }
+model   = { type = "string", default = "GTR" }
+
+# Declared upfront, not discovered at runtime. This is what lets the graph be
+# cycle-checked and planned before anything executes.
+[[inputs]]
+name   = "matrix"
+recipe = "distance_matrix"
+key    = { dataset = "${dataset}" }   # mapped from this recipe's own key

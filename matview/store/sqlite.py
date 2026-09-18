@@ -269,6 +269,17 @@ class SqliteStore:
         rows = self._connect().execute(" ".join(sql), params).fetchall()
         return [_ref_from_row(row) for row in rows]
 
+    def recipe_source_hash(self, recipe: str, version: int) -> str | None:
+        """The advisory source hash last recorded for a recipe version, if any."""
+        row = (
+            self._connect()
+            .execute(
+                "SELECT source_hash FROM recipe WHERE name = ? AND version = ?", (recipe, version)
+            )
+            .fetchone()
+        )
+        return None if row is None or row["source_hash"] is None else str(row["source_hash"])
+
     def pending_tasks(self) -> list[sqlite3.Row]:
         """Rows written by `on_miss="enqueue"`. Nothing in v1 consumes them."""
         return list(self._connect().execute("SELECT * FROM task ORDER BY id").fetchall())

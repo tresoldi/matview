@@ -338,3 +338,23 @@ polars 1.44.2 + pyarrow 25.0.1 + numpy 2.4.6.
 The extras' version floors are the oldest combination actually verified, and CI re-checks
 the golden bytes against exactly that combination on every push. The guarantee the spec
 asks for is only as good as something that tests it.
+
+## D30 — A foreign recipe's input must name a part if the dependency is partitioned
+
+The invocation contract materializes each declared input as one file. A partitioned
+dependency is several artifacts, and there is no obvious single file to hand over: a
+directory would need a layout convention the manifest format does not have, and
+concatenating would require the host to understand the codec's partitioning, which is
+exactly what the spec keeps out of the core.
+
+So `[[inputs]]` takes an optional `part`, and an input resolving to a partitioned
+artifact without one is an error that says so. The common case in the finance design —
+a recipe reading one closed year — is served directly, and the error names the fix.
+
+## D31 — Foreign parameter types are checked, but the key is canonical either way
+
+A manifest declares `dataset = { type = "string" }`. Declared defaults are type-checked
+when the manifest loads, and call-time values when the recipe runs. Neither check is
+load-bearing for correctness: a value of the wrong type simply canonicalizes to a
+different key and therefore a different artifact. The checks exist to turn that into an
+error at the call rather than a mysteriously cold cache.

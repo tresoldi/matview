@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from matview.canon import RESERVED_KEY_FIELDS, Scalar, canonicalize_key, normalize_scalar
@@ -50,6 +50,8 @@ class ForeignSpec:
     inputs: tuple[ForeignInput, ...]
     source: str | None
     manifest_path: str | None
+    param_types: Mapping[str, str] = field(default_factory=dict)
+    workdir: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

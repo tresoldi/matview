@@ -11,10 +11,10 @@ import re
 from pathlib import Path
 
 import pytest
+from matview.codecs import CODEC_NAMES, CodecUnavailable, get_codec
 
 from matview import Cache, Registry, SqliteStore, recipe
-from matview.codecs import CODEC_NAMES, CodecUnavailable, get_codec
-from matview.errors import MissingArtifacts
+from matview.errors import CodecError, MissingArtifacts
 from matview.fingerprint import fingerprint
 from matview.types import DepEdge
 
@@ -269,9 +269,9 @@ def test_rule08_dep_version_not_in_fingerprint() -> None:
     assert fp(1) == fp(99), "a dependency contributes only its content digest"
 
     # The dependent's own version, by contrast, is in there.
-    assert fingerprint(recipe="sma", version=3, key_hash="a" * 64, part=None, deps=()) != fingerprint(
-        recipe="sma", version=4, key_hash="a" * 64, part=None, deps=()
-    )
+    assert fingerprint(
+        recipe="sma", version=3, key_hash="a" * 64, part=None, deps=()
+    ) != fingerprint(recipe="sma", version=4, key_hash="a" * 64, part=None, deps=())
 
 
 def test_rule08_end_to_end_dep_version_bump_does_not_invalidate(
@@ -334,7 +334,9 @@ def test_rule10_no_pickle_anywhere() -> None:
         code = "\n".join(line.split("#", 1)[0] for line in source.splitlines())
         if re.search(r"\b(pickle|cPickle|dill|cloudpickle|shelve|marshal)\b", code):
             offenders.append(str(path.relative_to(PACKAGE_ROOT.parent)))
-    assert offenders == [], f"pickle would make the cache Python-only and unsafe to share: {offenders}"
+    assert offenders == [], (
+        f"pickle would make the cache Python-only and unsafe to share: {offenders}"
+    )
 
 
 def test_rule10_numpy_codec_refuses_object_arrays() -> None:
@@ -345,5 +347,5 @@ def test_rule10_numpy_codec_refuses_object_arrays() -> None:
     except CodecUnavailable:  # pragma: no cover - importorskip already covers this
         pytest.skip("npy extra not installed")
 
-    with pytest.raises(Exception):
+    with pytest.raises(CodecError, match="object"):
         codec.encode(np.array([{"a": 1}, {"b": 2}], dtype=object))

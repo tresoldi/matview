@@ -1,0 +1,211 @@
+{
+  "_comment": "Golden vectors for SPEC.md. Fixed inputs, fixed digests. A second implementation in any language must reproduce every value here exactly. Regenerate only when fingerprint_spec_version is deliberately bumped.",
+  "fingerprint_spec_version": 1,
+  "hash": "BLAKE2b, 32-byte digest, no key or salt, hex-encoded lowercase",
+  "keys": [
+    {
+      "key": {},
+      "key_json": "{}",
+      "key_hash": "c09da522dac261c3d2566230bed10d2f3ef13f8e7654576c12e857e07f786098"
+    },
+    {
+      "key": {
+        "symbol": "AAPL",
+        "window": 200
+      },
+      "key_json": "{\"symbol\":\"AAPL\",\"window\":200}",
+      "key_hash": "f3c84d0ba11d7321ab1a36b29593f6daf77d19bfdf4c7504683016fc416101bf"
+    },
+    {
+      "key": {
+        "window": 14.0
+      },
+      "key_json": "{\"window\":14}",
+      "key_hash": "8512607e27bea80ad23afbf8a4a7eb8ca77624bea46aafbec0656eafe25c34c3"
+    },
+    {
+      "key": {
+        "window": 14
+      },
+      "key_json": "{\"window\":14}",
+      "key_hash": "8512607e27bea80ad23afbf8a4a7eb8ca77624bea46aafbec0656eafe25c34c3"
+    },
+    {
+      "key": {
+        "alpha": 0.1
+      },
+      "key_json": "{\"alpha\":0.1}",
+      "key_hash": "9c43fb4a9d5302cf960ffd29be735ee055e0e1508fe61067373908d2864e5c17"
+    },
+    {
+      "key": {
+        "big": 1e+300
+      },
+      "key_json": "{\"big\":1e+300}",
+      "key_hash": "f4393cfa686eb710865750856a3ebe7ec5da339810489490fd3d51285abc9585"
+    },
+    {
+      "key": {
+        "tiny": 1e-07
+      },
+      "key_json": "{\"tiny\":1e-7}",
+      "key_hash": "ccab3563864f2cd508cdcf22545029c194b6268cd724f0f043e46858f1781508"
+    },
+    {
+      "key": {
+        "flag": true,
+        "missing": null
+      },
+      "key_json": "{\"flag\":true,\"missing\":null}",
+      "key_hash": "714203d5079e4d7f93a4e207ecf42c2d74f35c45a6948e802a1aad29083a49c3"
+    },
+    {
+      "key": {
+        "b": 1,
+        "a": 2,
+        "Z": 3,
+        "é": 4
+      },
+      "key_json": "{\"Z\":3,\"a\":2,\"b\":1,\"é\":4}",
+      "key_hash": "0d331df40a97c2b713055f8e6789569172cfa146ef483387b2d0fc09b7d75274"
+    },
+    {
+      "key": {
+        "unicode": "日本語 ü 😀"
+      },
+      "key_json": "{\"unicode\":\"日本語 ü 😀\"}",
+      "key_hash": "8ea2038ecfa12aa881f547f36d401b72f6ff2da43d392b2b74bfa5360d793d7e"
+    },
+    {
+      "key": {
+        "symbol": "AAPL",
+        "interval": "1d",
+        "adjust": "split"
+      },
+      "key_json": "{\"adjust\":\"split\",\"interval\":\"1d\",\"symbol\":\"AAPL\"}",
+      "key_hash": "6e5daebb692fa1132e6670ff107ecdf3641088e4114f80d13e1f8436331a2f5d"
+    },
+    {
+      "key": {
+        "negzero": -0.0
+      },
+      "key_json": "{\"negzero\":0}",
+      "key_hash": "7cac4605663f7a0cf1e732ca9ab92a594904e92626f86b1a41da6391a2892f60"
+    },
+    {
+      "key": {
+        "edge": 9007199254740991
+      },
+      "key_json": "{\"edge\":9007199254740991}",
+      "key_hash": "52230e77da07c559273fabf6d9e0ff846725e0710a166ab6aba06bdabe8efa29"
+    },
+    {
+      "key": {
+        "edge_negative": -9007199254740991
+      },
+      "key_json": "{\"edge_negative\":-9007199254740991}",
+      "key_hash": "e49a719d2d561ec651a4d0d5afca17ea661badb5ba679b198a22aee881ad25d0"
+    }
+  ],
+  "digests": [
+    {
+      "bytes_hex": "",
+      "digest": "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8"
+    },
+    {
+      "bytes_hex": "61",
+      "digest": "8928aae63c84d87ea098564d1e03ad813f107add474e56aedd286349c0c03ea4"
+    },
+    {
+      "bytes_hex": "7b2261223a317d",
+      "digest": "10a7ff3e312baec0c356be489739b93f63af84416c40f1c13023eb96c7ed50aa"
+    },
+    {
+      "bytes_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "digest": "39a7eb9fedc19aabc83425c6755dd90e6f9d0c804964a1f4aaeea3b9fb599835"
+    },
+    {
+      "bytes_hex": "e697a5e69cace8aa9e",
+      "digest": "8b3bfe5f336de292052b9f023a45c7b6dd80628516dbad47f5c0a0ff3b429bc0"
+    }
+  ],
+  "fingerprints": [
+    {
+      "recipe": "ohlcv",
+      "version": 1,
+      "key_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "part": null,
+      "deps": [],
+      "fingerprint": "f929207c7c0ff484af293e43fc4cca6d89eb3db0d7673851c96ee851e455c1ab"
+    },
+    {
+      "recipe": "sma",
+      "version": 3,
+      "key_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "part": null,
+      "deps": [
+        {
+          "recipe": "ohlcv",
+          "version": 1,
+          "key_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "part": null,
+          "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "fingerprint": "d8b5945e1f9ada715cb00a3f537879fbec94023e54ca6745dc1d05da44023caf"
+    },
+    {
+      "recipe": "sma",
+      "version": 3,
+      "key_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "part": "2026",
+      "deps": [
+        {
+          "recipe": "ohlcv",
+          "version": 1,
+          "key_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "part": null,
+          "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        {
+          "recipe": "ohlcv",
+          "version": 7,
+          "key_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "part": "2026",
+          "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+          "recipe": "calendar",
+          "version": 2,
+          "key_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "part": null,
+          "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "fingerprint": "18f42cab945a3896acfd9ae67ab5b11eed4d1d3093e84506081ba10201827800"
+    },
+    {
+      "recipe": "phylo_tree",
+      "version": 2,
+      "key_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "part": "",
+      "deps": [
+        {
+          "recipe": "ohlcv",
+          "version": 7,
+          "key_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "part": "2026",
+          "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+          "recipe": "calendar",
+          "version": 2,
+          "key_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "part": null,
+          "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "fingerprint": "315f09383ec118ff7705012278b9927f9e907b3aff1c8504f9c4600d3670583d"
+    }
+  ]
+}

@@ -4,6 +4,10 @@ The recipe registry is global and import-time by design, which is fine for a pro
 and poison for a test suite, so every test gets an isolated `Registry` and passes it
 explicitly. That is also the reason `Cache` must not be global: see the spec's "Three
 behaviours to fix from the start".
+
+Imports are deliberately inside the fixtures. The suite is built stage by stage, and
+a module-level import of the whole public API would make every earlier stage's tests
+uncollectable until the last stage landed.
 """
 
 from __future__ import annotations
@@ -11,28 +15,31 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from matview import Cache, Registry, SqliteStore
-from matview.fingerprint import canonical_key_hash, digest_bytes, fingerprint
-from matview.types import Artifact
-
 
 @pytest.fixture
-def registry() -> Registry:
+def registry() -> Any:
+    from matview import Registry
+
     return Registry()
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[SqliteStore]:
+def store(tmp_path: Path) -> Iterator[Any]:
+    from matview import SqliteStore
+
     s = SqliteStore(tmp_path / "test.db")
     yield s
     s.close()
 
 
 @pytest.fixture
-def cache(store: SqliteStore, registry: Registry) -> Cache:
+def cache(store: Any, registry: Any) -> Any:
+    from matview import Cache
+
     return Cache(store=store, registry=registry)
 
 
@@ -46,8 +53,11 @@ def make_artifact(
     data: bytes = b"{}",
     deps: tuple = (),
     index_fields: dict[str, str] | None = None,
-) -> Artifact:
+) -> Any:
     """Build an Artifact the way the scheduler would, for tests that poke the store directly."""
+    from matview.fingerprint import canonical_key_hash, digest_bytes, fingerprint
+    from matview.types import Artifact
+
     key = {} if key is None else key
     key_json, key_hash = canonical_key_hash(key)
     dg = digest_bytes(data)

@@ -34,7 +34,9 @@ Source = "https://github.com/tresoldi/matview"
 
 [project.optional-dependencies]
 # Codecs are extras so the core installs with no heavy dependencies.
-arrow = ["polars>=1.0", "pyarrow>=16.0"]
+# Floors are the oldest versions the cross-version byte-determinism job actually
+# checks; see docs/ci-workflow.yml and DECISIONS.md D29.
+arrow = ["polars>=1.20", "pyarrow>=16.0"]
 npy = ["numpy>=1.26"]
 json = []
 all = ["matview[arrow,npy,json]"]
@@ -62,3 +64,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
+
+# The core must typecheck with no codec extras installed, so the optional libraries the
+# codec modules import lazily are not resolvable here. Their use is confined to those
+# modules and covered by the codec tests, which do run with the extras present.
+[[tool.mypy.overrides]]
+module = ["polars.*", "pyarrow.*", "numpy.*"]
+ignore_missing_imports = true

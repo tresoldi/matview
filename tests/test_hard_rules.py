@@ -7,6 +7,7 @@ The spec requires these to exist before the behaviour they constrain.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -332,27 +333,70 @@ def test_rule09_empty_is_a_value(cache: Cache, registry: Registry, value: object
 # ---------------------------------------------------------------------------
 
 
+#: Not a bare word scan: `allow_pickle=False` is exactly the call a correct codec
+#: makes, and an error message explaining the refusal should be allowed to say so.
+#: These patterns are the actual ways a Python object graph reaches the store.
+FORBIDDEN_SERIALIZATION = [
+    r"^\s*import\s+(pickle|cPickle|dill|cloudpickle|marshal|shelve)\b",
+    r"^\s*from\s+(pickle|cPickle|dill|cloudpickle|marshal|shelve)\b",
+    r"\b(pickle|cPickle|dill|cloudpickle|marshal)\.(dump|dumps|load|loads)\s*\(",
+    r"\ballow_pickle\s*=\s*True\b",
+    r"\b(to_pickle|read_pickle)\s*\(",
+]
+
+
 def test_rule10_no_pickle_anywhere() -> None:
+    """Pickle would make the cache Python-only and unsafe to share.
+
+    That forecloses the whole foreign-recipe design, so it is not a style preference.
+    """
     offenders = []
-    for path in PACKAGE_ROOT.rglob("*.py"):
-        source = path.read_text(encoding="utf-8")
-        # Strip comments so the explanatory note about *why* not, in the codec docs,
-        # does not trip the scan.
-        code = "\n".join(line.split("#", 1)[0] for line in source.splitlines())
-        if re.search(r"\b(pickle|cPickle|dill|cloudpickle|shelve|marshal)\b", code):
-            offenders.append(str(path.relative_to(PACKAGE_ROOT.parent)))
-    assert offenders == [], (
-        f"pickle would make the cache Python-only and unsafe to share: {offenders}"
-    )
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        code = "\n".join(
+            line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        for pattern in FORBIDDEN_SERIALIZATION:
+            for match in re.finditer(pattern, code, flags=re.MULTILINE):
+                offenders.append(f"{path.relative_to(PACKAGE_ROOT.parent)}: {match.group(0)!r}")
+    assert offenders == [], offenders
+
+
+def test_rule10_numpy_is_always_called_with_pickling_off() -> None:
+    """`numpy.save` and `numpy.load` reach for it by default unless told not to.
+
+    Parsed rather than pattern-matched: nested calls in the arguments defeat any regex
+    that tries to find the closing parenthesis.
+    """
+    call_sites = []
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in {"save", "load", "savez", "loadtxt", "genfromtxt"}:
+                continue
+            value = node.func.value
+            if not (isinstance(value, ast.Name) and value.id in {"np", "numpy"}):
+                continue
+            off = any(
+                kw.arg == "allow_pickle"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is False
+                for kw in node.keywords
+            )
+            call_sites.append((str(path.relative_to(PACKAGE_ROOT.parent)), node.func.attr, off))
+
+    assert call_sites, "expected the npy codec to call np.save and np.load"
+    bad = [f"{where}: np.{attr}" for where, attr, off in call_sites if not off]
+    assert bad == [], bad
 
 
 def test_rule10_numpy_codec_refuses_object_arrays() -> None:
-    """`numpy.save` pickles object arrays unless told not to. It must be told not to."""
     np = pytest.importorskip("numpy")
     try:
         codec = get_codec("npy")
     except CodecUnavailable:  # pragma: no cover - importorskip already covers this
         pytest.skip("npy extra not installed")
 
-    with pytest.raises(CodecError, match="object"):
+    with pytest.raises(CodecError, match="object arrays"):
         codec.encode(np.array([{"a": 1}, {"b": 2}], dtype=object))

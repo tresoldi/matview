@@ -438,3 +438,24 @@ ordinary cache hits into graph traversals and quietly make a TTL transitive. Sch
 refresh age-limited source roots first; a changed digest then performs the ordinary
 invalidation cascade. If a walk reaches an expired dependency for another reason, its
 age and `on_miss` policy are still enforced.
+
+## D35 — `expired` is counted as a reason, not an outcome
+
+`CacheStats` separates the outcomes of resolving a node — hit, revalidated, recomputed,
+blocked — and those four partition the nodes a walk touched, which is what makes
+`lookups` and `hit_rate` mean anything.
+
+An expiry under `max_age` (D34) is not a fifth outcome. An expired node goes on to be
+recomputed, or to be blocked by its `on_miss` ceiling, and is counted there. So `expired`
+records *why* that happened and is deliberately excluded from `lookups`, rather than
+being folded in and quietly breaking the partition.
+
+It is also deduplicated per walk, exactly as the missing set is, because one node can be
+reached twice in a single walk: a blocked node is never memoized, so a stale dependent
+resolves its expired dependency once while verifying its fingerprint and again from its
+own body. Counting that twice would overstate how much a clock actually drove.
+
+It exists because the counters cannot otherwise answer the question a TTL raises. A
+rebuild caused by a changed input and a rebuild caused by a clock cost the same and mean
+entirely different things, and without this counter a graph with short `max_age` values
+is indistinguishable from one with an invalidation bug.

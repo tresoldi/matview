@@ -83,6 +83,7 @@ class _Walk:
     memo: dict[tuple[str, str, str | None], list[Artifact]] = field(default_factory=dict)
     missing: list[MissingNode] = field(default_factory=list)
     missing_seen: set[tuple[str, str, str | None]] = field(default_factory=set)
+    expired_seen: set[tuple[str, str, str | None]] = field(default_factory=set)
     stale: list[ArtifactRef] = field(default_factory=list)
     current: list[ArtifactRef] = field(default_factory=list)
     nondeterministic: set[str] = field(default_factory=set)
@@ -381,6 +382,21 @@ class Cache:
             and rec.max_age is not None
             and int(time.time()) >= min(row.refreshed_at for row in rows) + rec.max_age
         )
+        if expired and node not in walk.expired_seen:
+            # Counted as a reason rather than an outcome: what follows is also counted
+            # under recomputed or blocked. See DECISIONS.md D35.
+            #
+            # Deduplicated per walk, like the missing set, because one node can be
+            # reached twice in a single walk: a blocked node is never memoized, so a
+            # stale dependent resolves it once while verifying and again from its own
+            # body. Counting that twice would overstate how much a clock actually drove.
+            walk.expired_seen.add(node)
+            self.stats.expired += 1
+            log.debug(
+                "expired %s (max_age %ds elapsed since its last refresh)",
+                walk.path[-1],
+                rec.max_age,
+            )
 
         if rows and not force_this and not expired:
             if all(row.valid for row in rows):

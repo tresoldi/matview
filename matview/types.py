@@ -203,6 +203,16 @@ class CacheStats:
     blocked: int = 0
     """Nodes that could not be produced under the effective policy."""
 
+    expired: int = 0
+    """Nodes whose `max_age` had elapsed.
+
+    A *reason*, not an outcome, and deliberately not part of `lookups`: each of these is
+    also counted under `recomputed` or `blocked` depending on what followed. It answers
+    the question the other counters cannot — how much of the work was driven by a clock
+    rather than by a changed input. Without it a TTL-heavy graph looks exactly like one
+    with an invalidation problem. See DECISIONS.md D35.
+    """
+
     enqueued: int = 0
     """Task rows written by `on_miss="enqueue"`."""
 
@@ -213,6 +223,7 @@ class CacheStats:
 
     @property
     def lookups(self) -> int:
+        """Outcomes, which partition the nodes resolved. `expired` is not among them."""
         return self.hits + self.revalidated + self.recomputed + self.blocked
 
     @property
@@ -231,12 +242,16 @@ class CacheStats:
             setattr(self, name, 0)
 
     def describe(self) -> str:
-        return (
+        text = (
             f"{self.lookups} lookups: {self.hits} hit, {self.revalidated} revalidated, "
             f"{self.recomputed} recomputed, {self.blocked} blocked "
-            f"({self.hit_rate:.0%} hit rate); "
-            f"{self.artifacts_written} artifacts / {self.bytes_written} bytes written, "
-            f"{self.compute_ms} ms computing"
+            f"({self.hit_rate:.0%} hit rate)"
+        )
+        if self.expired:
+            text += f", {self.expired} of them expired by max_age"
+        return (
+            f"{text}; {self.artifacts_written} artifacts / {self.bytes_written} bytes "
+            f"written, {self.compute_ms} ms computing"
         )
 
 

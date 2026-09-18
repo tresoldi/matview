@@ -48,6 +48,9 @@ First working version, not yet published. Will be released as 0.1.0.
   stops at its first blocked `ctx.get`; independent roots do not stop each other, which
   is what makes the spec's claim about cold runs — one report of everything that needs
   ingesting — actually true.
+- `cache.stats.expired`, counting nodes whose `max_age` had elapsed. A reason rather
+  than an outcome, so it is excluded from `lookups`: without it, a rebuild driven by a
+  clock is indistinguishable from one driven by a changed input.
 - `cache.stats`, and a `matview.scheduler` logger emitting one DEBUG event per node
   resolved. The counters separate a plain hit from a revalidation-without-recompute
   from a genuine rebuild, which a two-way hit/miss count hides.

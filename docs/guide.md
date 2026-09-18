@@ -76,6 +76,48 @@ and the stored bytes are returned without recomputing anything. Nothing is ever 
 on invalidation: deleting would collapse the first two states and lose early cutoff
 permanently.
 
+## Freshness
+
+A recipe may declare `max_age`, in seconds. Once that long has passed since its stored
+value was last successfully computed or checked, matview treats the value as needing
+recomputation.
+
+```python
+@recipe(version=1, codec="arrow", index=("symbol",), max_age=18 * 60 * 60)
+def ohlcv(ctx, *, symbol: str, interval: str = "1d"):
+    return vendor.bars(symbol, interval)
+```
+
+matview knows nothing about trading sessions, business days or cron. It decides whether
+a stored value is *old*; you still decide when reads happen.
+
+**Expiry is not invalidation.** It does not clear the stored `valid` bit and it does not
+cascade — it is ephemeral scheduler state for one read, not a statement about the
+dependency graph. `plan()` nevertheless reports an expired artifact under `stale`,
+because it needs work before that read can be current.
+
+**Freshness has its own clock.** Artifacts carry `refreshed_at` alongside `computed_at`,
+and only `refreshed_at` advances when a recomputation produces identical bytes. This is
+forced by rule 4: `computed_at` is preserved on that path, so using it for freshness
+would make an unchanged source refetch on *every* read once it had expired the first
+time. `computed_at` keeps its meaning — when the content last changed — and
+`refreshed_at` answers when it was last confirmed.
+
+!!! warning "A TTL is not transitive"
+    Expiry is checked when the recipe that declares it is resolved. A valid dependent is
+    returned from storage without walking its graph to inspect its dependencies' clocks —
+    doing so would turn every ordinary cache hit into a graph traversal and make a TTL
+    silently transitive.
+
+    So a scheduler should **refresh age-limited source roots first**, then ask for the
+    derived values. A changed digest then drives the ordinary invalidation cascade, and
+    everything downstream follows for the usual reasons.
+
+An expired dependency that the walk does reach still obeys its `on_miss` ceiling. A
+protected one therefore blocks rather than serving its old value, and must be refreshed
+explicitly as a root — the same rule as any other protected miss, and the same reason:
+a permissive caller must not be able to trigger a paid refetch it never mentioned.
+
 ## Policy
 
 ```python
@@ -316,9 +358,16 @@ The three outcomes worth telling apart are not visible in a two-way hit/miss cou
 | `revalidated` | Stale, fingerprint still matched, bytes returned **without** recomputing |
 | `recomputed` | The recipe actually ran |
 | `blocked` | Could not be produced under the effective policy |
+| `expired` | A `max_age` had elapsed — a **reason**, not an outcome |
 
 `revalidated` is early cutoff doing its job. `hit_rate` counts it as a hit, because no
 recipe ran and that is the cost that matters.
+
+The first four partition the nodes resolved, and `lookups` is their sum. `expired` sits
+alongside them: each expired node is *also* counted under `recomputed` or `blocked`,
+depending on what followed. It is there because a rebuild driven by a clock and a rebuild
+driven by a changed input are worth telling apart — without it, a graph with short
+`max_age` values looks indistinguishable from one with an invalidation bug.
 
 No log handler is installed: a library that configures logging is a library that fights
 its host.

@@ -120,6 +120,10 @@ class MissingNode:
     #: What the effective policy did here. "compute" appears only in a plan, where
     #: nothing runs, and means this node would be computed.
     action: Literal["compute", "enqueue", "raise"]
+    #: The resolution chain from the root down to and including this node. Knowing that
+    #: `ohlcv(AAPL)` is missing is a fact; knowing which indicator asked for it is the
+    #: thing that tells you what to do about it.
+    path: tuple[str, ...] = ()
 
     def describe(self) -> str:
         params = ", ".join(f"{k}={v!r}" for k, v in sorted(self.key.items()))
@@ -129,7 +133,10 @@ class MissingNode:
         reason = {"raise": "protected", "enqueue": "enqueued", "compute": "would compute"}[
             self.action
         ]
-        return f"{where} ({reason})"
+        text = f"{where} ({reason})"
+        if len(self.path) > 1:
+            text += "\n      wanted by " + " -> ".join(self.path[:-1])
+        return text
 
 
 @dataclass(frozen=True, slots=True)

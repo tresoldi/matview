@@ -591,3 +591,70 @@ def test_a_skipped_protected_node_is_still_reported(cache: Cache, registry: Regi
 
     with pytest.raises(MissingArtifacts):
         cache.get("derived", symbol="AAPL", force_deps=True)
+
+
+def test_a_protected_miss_reports_who_wanted_it(cache: Cache, registry: Registry) -> None:
+    """Knowing `ohlcv(AAPL)` is missing is a fact; knowing what asked is the diagnosis."""
+
+    @recipe(version=1, codec="json", on_miss="raise", registry=registry)
+    def vendor(ctx, *, symbol: str):
+        return {"bars": symbol}
+
+    @recipe(version=3, codec="json", registry=registry)
+    def indicator(ctx, *, symbol: str, window: int):
+        return ctx.get("vendor", symbol=symbol)
+
+    @recipe(version=1, codec="json", registry=registry)
+    def portfolio(ctx, *, symbol: str):
+        return ctx.get("indicator", symbol=symbol, window=200)
+
+    with pytest.raises(MissingArtifacts) as excinfo:
+        cache.get("portfolio", symbol="AAPL")
+
+    (node,) = excinfo.value.nodes
+    assert [step.split("(")[0] for step in node.path] == ["portfolio", "indicator", "vendor"]
+    assert node.path[-1].startswith("vendor"), "the chain ends at the node that is missing"
+
+    rendered = node.describe()
+    assert "wanted by" in rendered
+    assert "portfolio" in rendered and "window=200" in rendered
+    assert "wanted by" in str(excinfo.value)
+
+
+def test_the_path_is_recorded_through_a_stale_verification(
+    cache: Cache, registry: Registry
+) -> None:
+    """Nothing is computing during a verification, so a compute-time stack would be empty."""
+
+    @recipe(version=1, codec="json", on_miss="raise", registry=registry)
+    def vendor(ctx, *, symbol: str):
+        return {"bars": symbol}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def derived(ctx, *, symbol: str):
+        return ctx.get("vendor", symbol=symbol)
+
+    cache.get("vendor", symbol="AAPL", on_miss="compute")
+    cache.get("derived", symbol="AAPL")
+
+    @recipe(version=2, codec="json", on_miss="raise", registry=registry)
+    def vendor(ctx, *, symbol: str):  # noqa: F811
+        return {"bars": symbol.lower()}
+
+    cache.store.invalidate([cache.query(recipe="derived")[0].id])
+
+    with pytest.raises(MissingArtifacts) as excinfo:
+        cache.get("derived", symbol="AAPL")
+
+    (node,) = excinfo.value.nodes
+    assert [step.split("(")[0] for step in node.path] == ["derived", "vendor"]
+
+
+def test_a_plan_records_the_path_too(cache: Cache, registry: Registry) -> None:
+    @recipe(version=1, codec="json", registry=registry)
+    def leaf(ctx, *, n: int = 1):
+        return {"v": n}
+
+    report = cache.plan("leaf")
+    assert [step.split("(")[0] for step in report.absent[0].path] == ["leaf"]
+    assert "wanted by" not in report.absent[0].describe(), "a root has nobody above it"

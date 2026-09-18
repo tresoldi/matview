@@ -69,7 +69,7 @@ class _Walk:
 
     mode: Literal["compute", "plan"]
     policy: Policy
-    stack: list[str] = field(default_factory=list)
+    path: list[str] = field(default_factory=list)
     in_flight: set[tuple[str, str, str | None]] = field(default_factory=set)
     memo: dict[tuple[str, str, str | None], list[Artifact]] = field(default_factory=dict)
     missing: list[MissingNode] = field(default_factory=list)
@@ -243,10 +243,45 @@ class Cache:
         label = _label(rec, key, part)
 
         if node in walk.in_flight:
-            raise CycleError([*walk.stack, label])
+            raise CycleError([*walk.path, label])
         # Each descent checks the remaining budget before going any deeper.
         policy.check(label)
 
+        # The path is pushed here rather than in _compute, so that it is accurate
+        # during a stale verification as well, where dependencies are resolved without
+        # anything being computed.
+        walk.path.append(label)
+        try:
+            return self._resolve_node(
+                walk,
+                rec,
+                key,
+                key_json,
+                key_hash,
+                part,
+                node,
+                force=force,
+                policy=policy,
+                is_root=is_root,
+            )
+        finally:
+            walk.path.pop()
+
+    def _resolve_node(
+        self,
+        walk: _Walk,
+        rec: Recipe,
+        key: Mapping[str, Scalar],
+        key_json: str,
+        key_hash: str,
+        part: str | None,
+        node: tuple[str, str, str | None],
+        *,
+        force: bool,
+        policy: Policy,
+        is_root: bool,
+    ) -> list[Artifact]:
+        """The body of `_resolve`, with the cycle, deadline and path bookkeeping done."""
         if node in walk.memo:
             return walk.memo[node]
 
@@ -335,11 +370,9 @@ class Cache:
         policy: Policy,
     ) -> list[Artifact]:
         node = (rec.name, key_hash, part)
-        label = _label(rec, key, part)
         collected: list[DepEdge] = []
         ctx = Context(self, walk, policy, collected)
 
-        walk.stack.append(label)
         walk.in_flight.add(node)
         started = time.monotonic()
         try:
@@ -355,7 +388,6 @@ class Cache:
             else:  # pragma: no cover - registration accepts neither
                 raise MatviewError(f"{rec.name} has neither a function nor a manifest")
         finally:
-            walk.stack.pop()
             walk.in_flight.discard(node)
         # The recipe body's own cost, with dependency resolution attributed to the
         # dependency rather than to this node. See DECISIONS.md D6.
@@ -547,7 +579,12 @@ class Cache:
         walk.missing_seen.add(node)
         walk.missing.append(
             MissingNode(
-                recipe=rec.name, version=rec.version, key=dict(key), part=part, action=action
+                recipe=rec.name,
+                version=rec.version,
+                key=dict(key),
+                part=part,
+                action=action,
+                path=tuple(walk.path),
             )
         )
 

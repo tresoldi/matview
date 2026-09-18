@@ -376,8 +376,13 @@ class Cache:
         force_this = force or policy.force_deps
         rows = self._fetch(rec, key_hash, part)
         stale_and_wrong = False
+        expired = bool(
+            rows
+            and rec.max_age is not None
+            and int(time.time()) >= min(row.refreshed_at for row in rows) + rec.max_age
+        )
 
-        if rows and not force_this:
+        if rows and not force_this and not expired:
             if all(row.valid for row in rows):
                 self.stats.hits += 1
                 log.debug("hit %s", walk.path[-1])
@@ -397,6 +402,9 @@ class Cache:
                 log.debug("revalidated %s (fingerprint unchanged, not recomputed)", walk.path[-1])
                 return self._memoize(walk, node, rows)
             stale_and_wrong = True
+
+        if expired:
+            walk.stale.extend(replace(ref, valid=False) for ref in _as_refs(rows))
 
         # Everything below here needs the value produced.
         #
@@ -423,7 +431,7 @@ class Cache:
             return self._memoize(walk, node, rows)
 
         if effective != "compute":
-            if rows and not stale_and_wrong:
+            if rows and not stale_and_wrong and not expired:
                 # A forced recompute of a protected node is skipped, not an error: the
                 # stored value is still there and still current. The ceiling applies
                 # under force_deps too, which is exactly what "protected roots are
@@ -537,6 +545,7 @@ class Cache:
                 n_bytes=len(data),
                 data=data,
                 computed_at=now,
+                refreshed_at=now,
                 # Every part of one value shares the cost of producing that value;
                 # the compute happened once.
                 compute_ms=compute_ms,
@@ -709,6 +718,7 @@ def _as_refs(rows: Any) -> list[ArtifactRef]:
             valid=row.valid,
             n_bytes=row.n_bytes,
             computed_at=row.computed_at,
+            refreshed_at=row.refreshed_at,
             compute_ms=row.compute_ms,
         )
         for row in rows

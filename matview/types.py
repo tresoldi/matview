@@ -72,6 +72,7 @@ class Artifact:
     n_bytes: int
     data: bytes
     computed_at: int
+    refreshed_at: int
     compute_ms: int | None = None
     valid: bool = True
     id: int | None = None
@@ -94,6 +95,7 @@ class ArtifactRef:
     valid: bool
     n_bytes: int
     computed_at: int
+    refreshed_at: int
     compute_ms: int | None
 
 

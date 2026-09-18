@@ -64,6 +64,7 @@ class Recipe:
     index: tuple[str, ...]
     on_miss: OnMiss
     deterministic: bool
+    max_age: int | None
     params: tuple[str, ...]
     defaults: Mapping[str, Scalar]
     fn: Callable[..., Any] | None = None
@@ -141,6 +142,7 @@ def _validate(
     codec: str,
     index: tuple[str, ...],
     on_miss: str,
+    max_age: int | None,
     params: tuple[str, ...],
     defaults: Mapping[str, Any],
 ) -> dict[str, Scalar]:
@@ -152,6 +154,10 @@ def _validate(
         raise MatviewError(
             f"{name}: on_miss must be one of {', '.join(_VALID_ON_MISS)}, got {on_miss!r}"
         )
+    if max_age is not None and (
+        not isinstance(max_age, int) or isinstance(max_age, bool) or max_age < 1
+    ):
+        raise MatviewError(f"{name}: max_age must be a positive integer number of seconds")
     if not codec_is_known(codec):
         known = ", ".join(sorted(CODEC_NAMES))
         raise CodecError(f"{name}: unknown codec {codec!r}; known codecs: {known}")
@@ -180,6 +186,7 @@ def recipe(
     index: tuple[str, ...] | list[str] = (),
     on_miss: OnMiss = "compute",
     deterministic: bool = True,
+    max_age: int | None = None,
     registry: Registry | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register a function as a recipe.
@@ -189,6 +196,9 @@ def recipe(
     early cutoff and cascades unconditionally. The flag does not change scheduling; it
     exists so the cost is visible and `plan()` can report it, and nobody spends an
     afternoon wondering why one branch always rebuilds. See DECISIONS.md D4.
+
+    `max_age` is a generic freshness ceiling in seconds. Matview decides whether a
+    stored value is old; callers still decide when to read it. See DECISIONS.md D34.
     """
     target = REGISTRY if registry is None else registry
     index_fields = tuple(index)
@@ -215,6 +225,7 @@ def recipe(
             codec=codec,
             index=index_fields,
             on_miss=on_miss,
+            max_age=max_age,
             params=params,
             defaults=defaults,
         )
@@ -227,6 +238,7 @@ def recipe(
                 index=index_fields,
                 on_miss=on_miss,
                 deterministic=deterministic,
+                max_age=max_age,
                 params=params,
                 defaults=normalized,
                 fn=fn,
@@ -246,6 +258,7 @@ def register_foreign(
     index: tuple[str, ...],
     on_miss: OnMiss,
     deterministic: bool,
+    max_age: int | None,
     params: tuple[str, ...],
     defaults: Mapping[str, Any],
     spec: ForeignSpec,
@@ -258,6 +271,7 @@ def register_foreign(
         codec=codec,
         index=index,
         on_miss=on_miss,
+        max_age=max_age,
         params=params,
         defaults=defaults,
     )
@@ -269,6 +283,7 @@ def register_foreign(
             index=index,
             on_miss=on_miss,
             deterministic=deterministic,
+            max_age=max_age,
             params=params,
             defaults=normalized,
             fn=None,

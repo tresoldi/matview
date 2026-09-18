@@ -122,6 +122,7 @@ def load_manifest(path: str | Path, *, registry: Registry | None = None) -> Reci
     index = tuple(raw.get("index", ()))
     on_miss: OnMiss = raw.get("on_miss", "compute")
     deterministic = bool(raw.get("deterministic", True))
+    max_age = raw.get("max_age")
     source = raw.get("source")
 
     params: dict[str, dict[str, Any]] = raw.get("params", {})
@@ -173,6 +174,7 @@ def load_manifest(path: str | Path, *, registry: Registry | None = None) -> Reci
         index=index,
         on_miss=on_miss,
         deterministic=deterministic,
+        max_age=max_age,
         params=tuple(params),
         defaults=defaults,
         spec=spec,

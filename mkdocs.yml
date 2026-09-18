@@ -1,0 +1,56 @@
+site_name: matview
+site_description: Materialized views for derived values — a content-addressed compute cache over a dependency graph.
+site_url: https://tresoldi.github.io/matview/
+repo_url: https://github.com/tresoldi/matview
+repo_name: tresoldi/matview
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Switch to dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Switch to light mode}
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.details
+  - pymdownx.highlight: {anchor_linenums: true}
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Guide: guide.md
+  - API reference: reference.md
+  - Design spec: design-spec.md
+
+# SPEC.md, DECISIONS.md and PLAN.md deliberately stay at the repository root and are
+# linked to rather than copied in. SPEC.md is the cross-language interoperability
+# contract, and a second copy of it that could drift from the first is worse than no
+# copy at all.

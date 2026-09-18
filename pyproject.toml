@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "matview"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Materialized views for derived values: a content-addressed compute cache over a dependency graph."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["cache", "build-system", "dag", "memoization", "sqlite", "materialized-view"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3.11",
@@ -31,6 +31,9 @@ dependencies = ["rfc8785>=0.1.4"]
 [project.urls]
 Homepage = "https://github.com/tresoldi/matview"
 Source = "https://github.com/tresoldi/matview"
+Documentation = "https://tresoldi.github.io/matview/"
+Issues = "https://github.com/tresoldi/matview/issues"
+Changelog = "https://github.com/tresoldi/matview/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Codecs are extras so the core installs with no heavy dependencies.
@@ -40,7 +43,28 @@ arrow = ["polars>=1.20", "pyarrow>=16.0"]
 npy = ["numpy>=1.26"]
 json = []
 all = ["matview[arrow,npy,json]"]
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6", "mypy>=1.11"]
+# Documentation site.
+docs = [
+  # Upper-bounded deliberately: MkDocs 2.0 removes the plugin system and the theming
+  # system with no migration path, which would take mkdocstrings and the Material
+  # theme with it. Lift this only after checking the site still builds.
+  "mkdocs>=1.6,<2",
+  "mkdocs-material>=9.5,<10",
+  "mkdocstrings[python]>=0.26",
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pre-commit>=4.0",
+  # ruff and mypy are pinned exactly, and .pre-commit-config.yaml pins the same
+  # versions. Unpinned they drift between the local venv, the hook and CI, and the
+  # same code then passes in one and fails in another.
+  "ruff==0.16.8",
+  "mypy==2.3.1",
+]
+
+[tool.hatch.version]
+path = "matview/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["matview"]

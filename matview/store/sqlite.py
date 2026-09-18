@@ -149,6 +149,16 @@ class SqliteStore:
             raise
         conn.execute("COMMIT")
 
+        self._check_versions()
+
+    def _check_versions(self) -> None:
+        """Refuse a database this build cannot read correctly.
+
+        Both of these would otherwise fail silently rather than loudly, which is the
+        failure mode the whole design is arranged to avoid. A fingerprint spec mismatch
+        makes every lookup miss and look like an ordinary cold cache; a schema mismatch
+        means operating against a shape that is not the one in front of us.
+        """
         recorded = self.meta("fingerprint_spec_version")
         if recorded != str(FINGERPRINT_SPEC_VERSION):
             raise StoreError(
@@ -156,6 +166,27 @@ class SqliteStore:
                 f"build implements {FINGERPRINT_SPEC_VERSION}. Every hash in it would miss. "
                 f"Use a different file."
             )
+
+        schema = self.meta("schema_version")
+        if schema == str(SCHEMA_VERSION):
+            return
+        try:
+            found = int(str(schema))
+        except (TypeError, ValueError):
+            raise StoreError(
+                f"{self.path} records schema_version {schema!r}, which is not a version "
+                f"number. This is not a matview database, or it is damaged."
+            ) from None
+        if found > SCHEMA_VERSION:
+            raise StoreError(
+                f"{self.path} was written by a newer build (schema_version {found}); this "
+                f"one implements {SCHEMA_VERSION}. Upgrade matview rather than writing to it "
+                f"with an older build."
+            )
+        raise StoreError(
+            f"{self.path} was written under schema_version {found}; this build implements "
+            f"{SCHEMA_VERSION}, and no migration exists. Keep the old file and start a new one."
+        )
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Cursor]:

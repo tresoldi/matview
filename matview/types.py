@@ -49,6 +49,10 @@ class DepEdge:
     part: str | None
     digest: str
     artifact_id: int
+    #: The dependency's canonical key. Carried so a stale verification can re-resolve
+    #: the dependency at its *current* registered version, which may be a different
+    #: artifact row. Not fingerprinted, for the same reason `version` is not.
+    key_json: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,14 +117,18 @@ class MissingNode:
     version: int
     key: Mapping[str, Scalar]
     part: str | None
-    action: Literal["raise", "enqueue"]
+    #: What the effective policy did here. "compute" appears only in a plan, where
+    #: nothing runs, and means this node would be computed.
+    action: Literal["compute", "enqueue", "raise"]
 
     def describe(self) -> str:
         params = ", ".join(f"{k}={v!r}" for k, v in sorted(self.key.items()))
         where = f"{self.recipe}(v{self.version})[{params}]"
         if self.part is not None:
             where += f" part={self.part!r}"
-        reason = "protected" if self.action == "raise" else "enqueued"
+        reason = {"raise": "protected", "enqueue": "enqueued", "compute": "would compute"}[
+            self.action
+        ]
         return f"{where} ({reason})"
 
 

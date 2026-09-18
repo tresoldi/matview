@@ -51,6 +51,26 @@ class Store(Protocol):
 
     def store(self, artifact: Artifact, deps: Sequence[DepEdge]) -> StoreResult: ...
 
+    def store_parts(
+        self, artifacts: Sequence[Artifact], deps: Sequence[DepEdge]
+    ) -> list[StoreResult]:
+        """Every part of one value, in one transaction.
+
+        The partitioned generalization of `store()`. A codec returning a dict produces
+        several artifacts from a single compute; they share a dep set, differ only in
+        `part`, and a reader merging them must never see half of a rewrite. See
+        DECISIONS.md D24.
+        """
+        ...
+
+    def deps_of(self, artifact_id: int) -> list[DepEdge]:
+        """The stored edges of one artifact: what it actually read, last time it ran.
+
+        The stale read path walks these to recompute a fingerprint without running
+        anything, which is what makes revalidation-without-recompute possible.
+        """
+        ...
+
     def dependents_of(self, artifact_ids: Sequence[int]) -> list[int]: ...
 
     def invalidate(self, artifact_ids: Sequence[int]) -> int: ...
@@ -60,3 +80,13 @@ class Store(Protocol):
     def drop(self, recipe: str, version: int | None = None) -> int: ...
 
     def query(self, recipe: str | None = None, **indexed_fields: object) -> list[ArtifactRef]: ...
+
+    def gc(self) -> int:
+        """Drop superseded versions with no dependents."""
+        ...
+
+    def enqueue(
+        self, recipe: str, version: int, key_json: str, part: str | None, when: int
+    ) -> None:
+        """`on_miss="enqueue"` writes a task row here. Nothing in v1 consumes it."""
+        ...

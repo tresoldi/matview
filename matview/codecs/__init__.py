@@ -34,6 +34,7 @@ __all__ = [
     "Codec",
     "CodecError",
     "CodecUnavailable",
+    "codec_is_known",
     "get_codec",
     "register_codec",
 ]
@@ -123,3 +124,12 @@ def get_codec(name: str) -> Codec:
     if name not in _REGISTRY:  # pragma: no cover - a builtin module that failed to register
         raise CodecError(f"module {module} did not register codec {name!r}")
     return _REGISTRY[name]
+
+
+def codec_is_known(name: str) -> bool:
+    """Whether a codec name resolves, without importing its extra.
+
+    Used at registration so a typo fails at import time rather than at the first
+    compute, while an uninstalled extra does not stop a recipe being registered.
+    """
+    return name in _REGISTRY or name in _BUILTIN_MODULES

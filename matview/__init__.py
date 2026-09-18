@@ -14,6 +14,8 @@ The interoperability contract lives in ``SPEC.md`` and is versioned independentl
 of this package.
 """
 
+from matview.cache import Cache
+from matview.codecs import Codec, get_codec, register_codec
 from matview.errors import (
     ArtifactTooLarge,
     CodecError,
@@ -25,6 +27,7 @@ from matview.errors import (
     MissingArtifacts,
     RecipeNotFound,
 )
+from matview.registry import REGISTRY, Recipe, Registry, recipe
 from matview.store import SqliteStore, Store
 from matview.types import (
     Artifact,
@@ -37,9 +40,12 @@ from matview.types import (
 )
 
 __all__ = [
+    "REGISTRY",
     "Artifact",
     "ArtifactRef",
     "ArtifactTooLarge",
+    "Cache",
+    "Codec",
     "CodecError",
     "CycleError",
     "DeadlineExceeded",
@@ -51,11 +57,16 @@ __all__ = [
     "MissingNode",
     "OnMiss",
     "PlanReport",
+    "Recipe",
     "RecipeNotFound",
+    "Registry",
     "SqliteStore",
     "Store",
     "StoreResult",
     "__version__",
+    "get_codec",
+    "recipe",
+    "register_codec",
 ]
 
 __version__ = "0.0.0"

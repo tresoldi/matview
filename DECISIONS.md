@@ -227,3 +227,91 @@ the upsert, and a `WHERE NOT EXISTS` guard on the task insert. Writers serialize
 The alternative — adding `part TEXT NOT NULL DEFAULT ''` and using the empty string for
 unpartitioned values — would make the constraint do the work, but it changes a column the
 spec fixes, and `part` being `NULL` when unpartitioned is stated twice in the spec.
+
+## D24 — `store_parts()` alongside `store()`
+
+The spec's `Store` protocol has `store(artifact, deps)`, one artifact at a time, and
+justifies it by the transaction boundary: artifact, edges and cascade land together or
+not at all. A partitioned codec produces several artifacts from a single compute, and
+writing them through that method one at a time would put them in separate transactions,
+so a concurrent whole-value read could merge the new 2026 with the old 2025.
+
+`store_parts(artifacts, deps)` is the partitioned generalization: same transaction, same
+cascade rules, all parts of one `(recipe, version, key_hash)`. `store()` stays exactly
+as the spec fixes it, for the single-artifact case.
+
+`store_parts` also removes parts the recomputation no longer produced. That is not
+invalidation — rule 1 forbids deleting on invalidation, and this is not that. It is a
+part that no longer exists, and keeping it would let a whole-value read merge a phantom
+partition forever, since no future compute would ever refresh it. Dependents of a
+removed part are marked stale first.
+
+## D25 — One node resolves once per top-level call
+
+A diamond in the graph — two recipes both reading the same dependency — would otherwise
+resolve the shared node twice in a single walk. For a deterministic recipe that is only
+wasted work; for one declared `deterministic=False` the two resolutions could return
+different values, and the dependent would be built from an inconsistent snapshot.
+
+So a walk memoizes `(recipe, key_hash, part)` for its own duration and no longer. Across
+calls nothing is cached in memory: the store is the cache.
+
+## D26 — A forced recompute of a protected node is skipped, not an error
+
+`on_miss` governs *misses*. Under `force_deps=True` the walk reaches nodes that are
+present and current, and the spec says protected roots are "skipped even then" — so a
+node whose effective policy is stricter than `compute` keeps its stored value instead of
+being recomputed, and no error is raised.
+
+The exception is a node that is stale *and* failed verification: it is provably not
+current, so there is no good value to keep, and it is reported as missing like any other
+node that could not be produced.
+
+## D27 — The `on_miss` ceiling applies below the root, not at it
+
+The spec states the ceiling twice, and the two statements only agree under one reading:
+
+> the effective policy at any node is **the less permissive of what the caller asked for
+> and what the recipe declares**
+
+> A recipe declaring `on_miss="raise"` is protected everywhere it appears **as a
+> transitive dependency**.
+
+> Ingesting is then an explicit top-level act: the fetch script calls
+> `cache.get("ohlcv", symbol=..., on_miss="compute")` directly.
+
+Applied literally at every node including the root, the third of these can never work:
+`ohlcv` declares `on_miss="raise"`, so the ingest script's own explicit call would
+refuse to ingest. The ceiling is therefore enforced at every node the walk *descends*
+to, and the caller's ask governs at the node it named. That is where the hazard actually
+is — a permissive top-level ask firing a paid vendor request six levels down that the
+caller never mentioned — and it leaves a caller's explicit, deliberate request intact.
+
+A caller may still restrict at the root: `on_miss="raise"` on an ordinary recipe raises,
+because the caller's ask governs there in both directions.
+
+## D28 — How far batched miss reporting can actually reach
+
+The spec says not to raise on the first protected miss: walk as much of the graph as
+possible, collect every protected node that came up missing, and raise once with the
+full set.
+
+How far "as much as possible" reaches is decided by the spec's own central choice, that
+dependencies are discovered by execution. A Python recipe blocked on its first `ctx.get`
+cannot continue to its second, because it has no value to continue with, and inventing a
+sentinel to let it run on would be worse than useless. So batching collects everything
+wherever the dependency set is knowable *without* running the recipe:
+
+- **Stale verification.** Every stored edge of a stale artifact is resolved, and one
+  blocked edge does not stop the rest. This is the common case in practice.
+- **`plan()`.** The walk follows stored edges through valid and stale nodes alike, so a
+  plan over a warm graph reports every missing input at once.
+- **Foreign recipes,** whose inputs are declared in the manifest. The spec calls the
+  declared graph the privileged case for exactly this reason.
+
+An absent Python node with no stored edges is where the walk necessarily stops, and the
+documentation says so rather than implying a guarantee the design cannot make.
+
+Note also that `drop()` removes the dep edges pointing at what it deletes, so dropping a
+dependency also discards the record of who read it. A superseded version bump leaves
+those edges intact, which is why it, and not `drop()`, is the case where batching helps.

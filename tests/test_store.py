@@ -292,3 +292,29 @@ def test_a_second_unpartitioned_write_updates_rather_than_duplicating(store: Sql
     refs = store.query(recipe="r")
     assert len(refs) == 1
     assert store.fetch("r", 1, refs[0].key_hash, None).data == b'{"v":2}'
+
+
+def test_a_file_from_a_different_fingerprint_spec_is_refused(tmp_path) -> None:
+    """A mismatch here would not error on its own: every lookup would simply miss."""
+    path = tmp_path / "future.db"
+    first = SqliteStore(path)
+    first._connect().execute("UPDATE meta SET v = '99' WHERE k = 'fingerprint_spec_version'")
+    first.close()
+
+    with pytest.raises(Exception, match="fingerprint_spec_version 99"):
+        SqliteStore(path)
+
+
+def test_store_parts_refuses_artifacts_that_are_not_parts_of_one_value(store: SqliteStore) -> None:
+    with pytest.raises(Exception, match="parts of one value"):
+        store.store_parts(
+            [
+                make_artifact(recipe="a", part="2025", data=b"{}"),
+                make_artifact(recipe="b", part="2026", data=b"{}"),
+            ],
+            (),
+        )
+
+
+def test_store_parts_of_nothing_is_nothing(store: SqliteStore) -> None:
+    assert store.store_parts([], ()) == []

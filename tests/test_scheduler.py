@@ -10,7 +10,13 @@ import pytest
 
 from matview import Cache, Registry, SqliteStore, recipe
 from matview.codecs import BaseCodec, register_codec
-from matview.errors import CycleError, DeadlineExceeded, MissingArtifacts, RecipeNotFound
+from matview.errors import (
+    CodecError,
+    CycleError,
+    DeadlineExceeded,
+    MissingArtifacts,
+    RecipeNotFound,
+)
 from matview.fingerprint import key_hash
 
 # --- cycle detection -------------------------------------------------------
@@ -521,3 +527,67 @@ def test_a_part_that_stops_being_produced_is_removed(cache: Cache, registry: Reg
     assert [ref.part for ref in cache.query(recipe="series")] == ["2025"], (
         "a phantom partition would be merged into every later whole-value read"
     )
+
+
+def test_cache_drop_and_gc_are_reachable_from_the_cache(cache: Cache, registry: Registry) -> None:
+    @recipe(version=1, codec="json", registry=registry)
+    def thing(ctx, *, n: int = 1):
+        return {"v": 1}
+
+    cache.get("thing")
+
+    @recipe(version=2, codec="json", registry=registry)
+    def thing(ctx, *, n: int = 1):  # noqa: F811
+        return {"v": 2}
+
+    cache.get("thing")
+    assert sorted(ref.version for ref in cache.query(recipe="thing")) == [1, 2]
+
+    assert cache.gc() == 1, "the superseded version has no dependents"
+    assert [ref.version for ref in cache.query(recipe="thing")] == [2]
+    assert cache.drop("thing", version=2) == 1
+    assert cache.query(recipe="thing") == []
+
+
+def test_asking_for_a_part_an_unpartitioned_codec_never_produces(
+    cache: Cache, registry: Registry
+) -> None:
+    @recipe(version=1, codec="json", registry=registry)
+    def whole(ctx, *, n: int = 1):
+        return {"v": n}
+
+    with pytest.raises(CodecError, match="no such part"):
+        cache.get("whole", part="2026")
+
+
+def test_a_codec_that_splits_a_value_into_zero_parts_is_an_error(
+    cache: Cache, registry: Registry
+) -> None:
+    """Storing nothing at all would look exactly like a value that is legitimately empty."""
+
+    @recipe(version=1, codec="test-years", registry=registry)
+    def nothing(ctx, *, symbol: str):
+        return {}
+
+    with pytest.raises(CodecError, match="zero parts"):
+        cache.get("nothing", symbol="AAPL")
+    assert cache.query(recipe="nothing") == []
+
+
+def test_a_skipped_protected_node_is_still_reported(cache: Cache, registry: Registry) -> None:
+    """force_deps past a protected root returns a value *and* says what it could not honour."""
+
+    @recipe(version=1, codec="json", on_miss="raise", registry=registry)
+    def vendor(ctx, *, symbol: str):
+        return {"bars": symbol}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def derived(ctx, *, symbol: str):
+        return ctx.get("vendor", symbol=symbol)
+
+    cache.get("vendor", symbol="AAPL", on_miss="compute")
+    cache.get("derived", symbol="AAPL")
+    cache.drop("vendor")
+
+    with pytest.raises(MissingArtifacts):
+        cache.get("derived", symbol="AAPL", force_deps=True)

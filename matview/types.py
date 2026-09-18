@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from matview.canon import Scalar
 
@@ -20,6 +20,7 @@ __all__ = [
     "MissingNode",
     "OnMiss",
     "PlanReport",
+    "Request",
     "StoreResult",
     "stricter",
 ]
@@ -235,3 +236,89 @@ class CacheStats:
             f"{self.artifacts_written} artifacts / {self.bytes_written} bytes written, "
             f"{self.compute_ms} ms computing"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Request:
+    """One root of a batch: a recipe, its parameters, and optionally a single part."""
+
+    recipe: str
+    key: Mapping[str, Any]
+    part: str | None = None
+
+    @classmethod
+    def coerce(cls, value: Request | tuple[Any, ...]) -> Request:
+        """Accept a `Request`, or `(recipe, key)`, or `(recipe, key, part)`."""
+        if isinstance(value, Request):
+            return value
+        if isinstance(value, tuple) and len(value) in (2, 3):
+            return cls(*value)
+        raise TypeError(
+            f"a batch request is a Request, or a (recipe, key) or (recipe, key, part) "
+            f"tuple; got {value!r}"
+        )
+
+    def describe(self) -> str:
+        params = ", ".join(f"{k}={v!r}" for k, v in sorted(self.key.items()))
+        text = f"{self.recipe}[{params}]"
+        return text if self.part is None else f"{text} part={self.part!r}"
+
+
+@dataclass(frozen=True, slots=True)
+class BatchResult:
+    """What one batch walk produced.
+
+    `values` is keyed by the request's index rather than being a list, because `None`
+    and an empty frame are legitimate values: an artifact that resolved to `None` and a
+    request that did not resolve at all must not look the same. A request's index is
+    absent from `values` exactly when it could not be produced.
+    """
+
+    requests: tuple[Request, ...]
+    values: Mapping[int, Any]
+    missing: tuple[MissingNode, ...]
+
+    def __len__(self) -> int:
+        return len(self.requests)
+
+    def __getitem__(self, index: int) -> Any:
+        try:
+            return self.values[index]
+        except KeyError:
+            raise KeyError(
+                f"request {index} ({self.requests[index].describe()}) did not resolve; see .missing"
+            ) from None
+
+    def get(self, index: int, default: Any = None) -> Any:
+        return self.values.get(index, default)
+
+    @property
+    def resolved(self) -> tuple[int, ...]:
+        return tuple(sorted(self.values))
+
+    @property
+    def unresolved(self) -> tuple[int, ...]:
+        return tuple(i for i in range(len(self.requests)) if i not in self.values)
+
+    @property
+    def complete(self) -> bool:
+        return not self.missing
+
+    def raise_if_missing(self) -> None:
+        """Raise `MissingArtifacts` if anything could not be produced.
+
+        For callers who want a batch to behave like `get`, once they have had the
+        chance to look at what did resolve.
+        """
+        if self.missing:
+            from matview.errors import MissingArtifacts
+
+            raise MissingArtifacts(list(self.missing))
+
+    def describe(self) -> str:
+        lines = [f"{len(self.values)}/{len(self.requests)} resolved"]
+        for index in self.unresolved:
+            lines.append(f"  unresolved  {self.requests[index].describe()}")
+        for node in self.missing:
+            lines.append(f"  missing     {node.describe()}")
+        return "\n".join(lines)

@@ -755,3 +755,194 @@ def test_the_library_installs_no_log_handler(cache: Cache, registry: Registry) -
 
     for name in ("matview", "matview.scheduler", "matview.foreign"):
         assert logging.getLogger(name).handlers == []
+
+
+# --- batches ---------------------------------------------------------------
+
+
+def test_get_many_reports_every_missing_root_in_one_walk(cache: Cache, registry: Registry) -> None:
+    """The cold-backtest story: one run tells you everything to ingest.
+
+    A single root stops at its first blocked ctx.get. Independent roots in one walk do
+    not stop each other, which is the whole point of the method.
+    """
+
+    @recipe(version=1, codec="json", on_miss="raise", index=("symbol",), registry=registry)
+    def vendor(ctx, *, symbol: str):
+        return {"bars": symbol}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def indicator(ctx, *, symbol: str):
+        return {"v": ctx.get("vendor", symbol=symbol)["bars"]}
+
+    symbols = ["AAPL", "MSFT", "NVDA", "TSLA"]
+    cache.get("vendor", symbol="AAPL", on_miss="compute")  # one of four is ingested
+
+    result = cache.get_many([("indicator", {"symbol": s}) for s in symbols])
+
+    assert result.resolved == (0,), "only the symbol whose root was ingested"
+    assert result[0] == {"v": "AAPL"}
+    assert sorted(node.key["symbol"] for node in result.missing) == ["MSFT", "NVDA", "TSLA"]
+    assert result.unresolved == (1, 2, 3)
+    assert result.complete is False
+    assert len(result) == 4
+
+
+def test_get_many_shares_one_memo_across_roots(cache: Cache, registry: Registry) -> None:
+    calls = {"shared": 0}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def shared(ctx, *, n: int = 1):
+        calls["shared"] += 1
+        return {"v": n}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def left(ctx, *, n: int = 1):
+        return {"v": ctx.get("shared", n=n)["v"] + 1}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def right(ctx, *, n: int = 1):
+        return {"v": ctx.get("shared", n=n)["v"] + 2}
+
+    result = cache.get_many([("left", {}), ("right", {}), ("shared", {})])
+    assert [result[i] for i in range(3)] == [{"v": 2}, {"v": 3}, {"v": 1}]
+    assert calls["shared"] == 1, "one walk, one memo"
+
+
+def test_an_unresolved_request_is_distinguishable_from_a_none_value(
+    cache: Cache, registry: Registry
+) -> None:
+    """Rule 9 again: `None` is a value, so it cannot share a slot with 'not produced'."""
+
+    @recipe(version=1, codec="json", registry=registry)
+    def nothing(ctx, *, n: int = 1):
+        return None
+
+    @recipe(version=1, codec="json", on_miss="raise", registry=registry)
+    def protected_root(ctx, *, n: int = 1):
+        return {"v": n}
+
+    # Named directly, a protected recipe is governed by the caller's ask (D27), so the
+    # unobtainable request has to reach it transitively.
+    @recipe(version=1, codec="json", registry=registry)
+    def needs_protected(ctx, *, n: int = 1):
+        return ctx.get("protected_root", n=n)
+
+    result = cache.get_many([("nothing", {}), ("needs_protected", {})])
+
+    assert result[0] is None
+    assert 0 in result.values
+    assert 1 not in result.values, "absent, rather than None"
+    assert result.get(1, "fallback") == "fallback"
+    with pytest.raises(KeyError, match="did not resolve"):
+        result[1]
+
+
+def test_raise_if_missing_gives_back_the_single_root_behaviour(
+    cache: Cache, registry: Registry
+) -> None:
+    @recipe(version=1, codec="json", on_miss="raise", registry=registry)
+    def vendor(ctx, *, symbol: str):
+        return {"v": symbol}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def derived(ctx, *, symbol: str):
+        return ctx.get("vendor", symbol=symbol)
+
+    result = cache.get_many([("derived", {"symbol": "AAPL"})])
+    assert result.complete is False
+    with pytest.raises(MissingArtifacts):
+        result.raise_if_missing()
+
+    cache.get("vendor", symbol="AAPL", on_miss="compute")
+    ok = cache.get_many([("derived", {"symbol": "AAPL"})])
+    ok.raise_if_missing()
+    assert ok.complete is True and ok[0] == {"v": "AAPL"}
+
+
+def test_a_recipe_error_propagates_rather_than_being_collected(
+    cache: Cache, registry: Registry
+) -> None:
+    """A protected miss is a policy outcome; an exception is a bug, and is not swallowed."""
+
+    @recipe(version=1, codec="json", registry=registry)
+    def fine(ctx, *, n: int = 1):
+        return {"v": n}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def boom(ctx, *, n: int = 1):
+        raise RuntimeError("vendor is down")
+
+    with pytest.raises(RuntimeError, match="vendor is down"):
+        cache.get_many([("fine", {}), ("boom", {})])
+
+    assert [ref.recipe for ref in cache.query()] == ["fine"], "and the failure is not cached"
+
+
+def test_a_batch_accepts_requests_in_several_spellings(cache: Cache, registry: Registry) -> None:
+    from matview import Request
+
+    @recipe(version=1, codec="json", registry=registry)
+    def thing(ctx, *, n: int = 1):
+        return {"v": n}
+
+    result = cache.get_many([("thing", {"n": 1}), Request("thing", {"n": 2})])
+    assert [result[0], result[1]] == [{"v": 1}, {"v": 2}]
+
+    with pytest.raises(TypeError, match="a batch request is"):
+        cache.get_many(["thing"])  # type: ignore[list-item]
+
+
+def test_a_batch_deadline_covers_the_whole_walk(cache: Cache, registry: Registry) -> None:
+    @recipe(version=1, codec="json", index=("symbol",), registry=registry)
+    def slow(ctx, *, symbol: str):
+        time.sleep(0.05)
+        return {"v": symbol}
+
+    with pytest.raises(DeadlineExceeded):
+        cache.get_many([("slow", {"symbol": f"S{i}"}) for i in range(20)], deadline=0.1)
+
+
+def test_plan_many_reports_on_every_root_together(cache: Cache, registry: Registry) -> None:
+    @recipe(version=1, codec="json", index=("symbol",), registry=registry)
+    def bars(ctx, *, symbol: str):
+        return {"v": symbol}
+
+    cache.get("bars", symbol="AAPL")
+    report = cache.plan_many([("bars", {"symbol": s}) for s in ("AAPL", "MSFT", "NVDA")])
+
+    assert sorted(node.key["symbol"] for node in report.absent) == ["MSFT", "NVDA"]
+    assert [ref.key_json for ref in report.valid] == ['{"symbol":"AAPL"}']
+    assert report.is_current is False
+
+
+def test_the_root_exemption_applies_per_request_in_a_batch(
+    cache: Cache, registry: Registry
+) -> None:
+    """D27 at batch scale: naming a protected recipe directly is still deliberate intent.
+
+    This is what makes a batch usable as an ingest script — one call, every symbol —
+    while a batch that merely *depends* on the same recipe is still protected.
+    """
+    fetched = []
+
+    @recipe(version=1, codec="json", index=("symbol",), registry=registry)
+    def vendor(ctx, *, symbol: str):
+        fetched.append(symbol)
+        return {"v": symbol}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def derived(ctx, *, symbol: str):
+        return ctx.get("vendor", symbol=symbol)
+
+    # Declared protected only from here on, so the artifacts above do not exist yet.
+    registry.get("vendor")
+    object.__setattr__(registry.get("vendor"), "on_miss", "raise")
+
+    blocked = cache.get_many([("derived", {"symbol": s}) for s in ("AAPL", "MSFT")])
+    assert fetched == [], "reached transitively, the ceiling holds"
+    assert sorted(n.key["symbol"] for n in blocked.missing) == ["AAPL", "MSFT"]
+
+    ingested = cache.get_many([("vendor", {"symbol": s}) for s in ("AAPL", "MSFT")])
+    assert ingested.complete is True
+    assert fetched == ["AAPL", "MSFT"], "named directly, the caller's ask governs"

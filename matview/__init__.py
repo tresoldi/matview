@@ -32,10 +32,13 @@ from matview.store import SqliteStore, Store
 from matview.types import (
     Artifact,
     ArtifactRef,
+    BatchResult,
+    CacheStats,
     DepEdge,
     MissingNode,
     OnMiss,
     PlanReport,
+    Request,
     StoreResult,
 )
 
@@ -44,6 +47,7 @@ __all__ = [
     "Artifact",
     "ArtifactRef",
     "ArtifactTooLarge",
+    "BatchResult",
     "Cache",
     "CacheStats",
     "Codec",
@@ -61,6 +65,7 @@ __all__ = [
     "Recipe",
     "RecipeNotFound",
     "Registry",
+    "Request",
     "SqliteStore",
     "Store",
     "StoreResult",

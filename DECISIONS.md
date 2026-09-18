@@ -380,3 +380,37 @@ reports rather than the absence of an exception, because the pragma can decline 
 the mode without raising.
 
 `busy_timeout` is also now set *before* the switch rather than after, and is configurable.
+
+## D33 — `get_many` resolves roots sequentially in one shared walk
+
+A batch exists to make the spec's promise about cold runs true: "a cold backtest tells
+you in a single run exactly which symbols and intervals need ingesting, instead of one
+per attempt". D28 records why a single root cannot get there — a recipe blocked on its
+first `ctx.get` has no value to continue with — but independent roots do not block each
+other, so a batch reaches what a sequence of single calls cannot.
+
+Roots resolve in order, sharing one `_Walk` and therefore one memo, so a dependency
+common to several roots is computed once and a non-deterministic shared node cannot
+produce two different values within a batch.
+
+They are **not** run in parallel. The spec is explicit that the scheduler is plain
+recursion because "graph depth in practice is single digits, so coroutines or
+trampolining are unnecessary complexity", and parallel roots would make the memo, the
+in-flight set and the miss accumulator concurrent structures while several threads
+raced on the same rows. If the tier-2 benchmarks show this is the bottleneck, it can be
+reconsidered against measurements rather than against a guess.
+
+Two further choices inside `BatchResult`:
+
+- **`values` is keyed by request index, not a list.** `None` and an empty frame are
+  legitimate values (rule 9), so a positional list would make "resolved to `None`" and
+  "did not resolve" indistinguishable. A missing key means unresolved, and nothing else.
+- **A protected miss is collected; an exception propagates.** A miss is a modelled
+  policy outcome, so reporting all of them at once is the point. An exception raised by
+  a recipe is a bug, and collecting bugs into a dict that callers may never inspect is
+  how silent failures are built. `raise_if_missing()` is there for callers who want a
+  batch to behave exactly like `get` once they have looked at what did resolve.
+
+Note that each request in a batch is a *root*, so D27's exemption applies to it: naming
+a protected recipe directly is deliberate intent, which is what lets one batch call
+serve as an ingest script.

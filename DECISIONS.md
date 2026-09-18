@@ -315,3 +315,26 @@ documentation says so rather than implying a guarantee the design cannot make.
 Note also that `drop()` removes the dep edges pointing at what it deletes, so dropping a
 dependency also discards the record of who read it. A superseded version bump leaves
 those edges intact, which is why it, and not `drop()`, is the case where batching helps.
+
+## D29 — The `arrow` codec encodes through pyarrow, not through polars
+
+The spec says "Arrow IPC with compression off, fixed schema field ordering and no
+custom metadata is the safe default". That is right about the format and not sufficient
+in practice, because the writer matters too.
+
+Measured: `polars.DataFrame.write_ipc_stream(compression="uncompressed")` produces
+**different bytes** for the same frame under polars 1.20.0 and polars 1.44.2 — 904 bytes
+against 848, first differing at offset 4, in the metadata padding. Nothing errors. A
+routine `uv lock --upgrade` would have silently invalidated every artifact stored under
+this codec, and the cache would have looked cold forever afterwards.
+
+So the codec converts to an Arrow table and writes it with pyarrow under explicit
+options: stream format, `compression=None`, `metadata_version=V5`, `allow_64bit=False`,
+`use_threads=False`, schema and field metadata stripped, and `combine_chunks()` so that
+how a frame happened to be assembled cannot leak into the bytes. That combination
+produces identical bytes under polars 1.20.0 + pyarrow 16.1.0 + numpy 1.26.4 and under
+polars 1.44.2 + pyarrow 25.0.1 + numpy 2.4.6.
+
+The extras' version floors are the oldest combination actually verified, and CI re-checks
+the golden bytes against exactly that combination on every push. The guarantee the spec
+asks for is only as good as something that tests it.

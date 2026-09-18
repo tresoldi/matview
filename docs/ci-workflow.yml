@@ -38,11 +38,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install ${{ matrix.python-version }}
+      # --exact matters: without it uv leaves previously synced extras in the venv and
+      # this step silently tests the same environment as the next one.
       - name: Test with the core only (no codec extras installed)
-        run: uv run --python ${{ matrix.python-version }} --extra dev pytest
+        run: uv run --python ${{ matrix.python-version }} --extra dev --exact pytest
       - name: Test with every codec extra installed
         run: uv run --python ${{ matrix.python-version }} --all-extras pytest
 
-  # Codec byte-determinism has to hold across library versions, not just across
-  # runs on one machine, so stage 6 adds a job here that pins old and new polars,
-  # numpy and pyarrow and asserts the golden payload bytes are identical under each.
+  # Byte-determinism has to hold across library versions, not just across runs on one
+  # machine. A codec that drifts does not error: every artifact stored under it simply
+  # stops being found, and the cache looks permanently cold. So the golden codec bytes
+  # are re-checked against the oldest supported libraries on every push.
+  #
+  # This is the job that would have caught polars' own IPC writer changing its metadata
+  # padding between 1.20 and 1.44. See DECISIONS.md D29.
+  codec-determinism-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.11
+      - name: Golden codec bytes under the oldest supported libraries
+        run: |
+          uv run --python 3.11 --no-project \
+            --with 'polars==1.20.0' --with 'pyarrow==16.1.0' --with 'numpy==1.26.4' \
+            --with 'rfc8785>=0.1.4' --with 'pytest>=8.0' \
+            python -m pytest tests/test_codecs.py -q

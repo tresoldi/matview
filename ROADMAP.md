@@ -17,6 +17,8 @@ Two standing constraints apply to everything below.
 
 ## Tier 1 — gaps that are closer to defects than to features
 
+**All four are done.** Kept here with their reasoning; see `CHANGELOG.md`.
+
 ### `schema_version` is written and never read
 
 `SqliteStore` refuses to open a database whose `fingerprint_spec_version` does not match
@@ -55,7 +57,7 @@ evidence, which is where surprises live.
 
 ## Tier 2 — features that deliver promises already made
 
-### `get_many` / `plan_many`
+### `get_many` / `plan_many` — done
 
 The spec's headline story for the `on_miss` ceiling is that a cold backtest "tells you
 in a single run exactly which symbols and intervals need ingesting, instead of one per

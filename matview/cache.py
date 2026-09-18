@@ -27,6 +27,7 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Any, Literal
 
 from matview.canon import Scalar, utf16_sort_key
@@ -46,11 +47,13 @@ from matview.store.base import Store
 from matview.types import (
     Artifact,
     ArtifactRef,
+    BatchResult,
     CacheStats,
     DepEdge,
     MissingNode,
     OnMiss,
     PlanReport,
+    Request,
     stricter,
 )
 
@@ -143,6 +146,88 @@ class Cache:
         """
         return self._top_level(recipe, params, part, on_miss, force, force_deps, deadline)[0]
 
+    def get_many(
+        self,
+        requests: Sequence[Request | tuple[Any, ...]],
+        *,
+        on_miss: OnMiss = "compute",
+        force: bool = False,
+        force_deps: bool = False,
+        deadline: float | None = None,
+    ) -> BatchResult:
+        """Resolve many roots in one walk.
+
+        This is what makes the spec's story about cold runs true. A recipe blocked on
+        its first `ctx.get` cannot continue, so a single root reports one protected
+        miss and stops — but five hundred *independent* roots in one walk report
+        everything they need between them, which is the difference between one run and
+        five hundred.
+
+        Roots resolve in order, sharing one memo, so a dependency common to several of
+        them is computed once. They are not run in parallel: the scheduler is plain
+        recursion by design, and making the memo, the in-flight set and the miss
+        accumulator concurrent would change its character. See DECISIONS.md D33.
+
+        A protected miss is a policy outcome and is collected. An exception raised by a
+        recipe is not, and propagates immediately.
+        """
+        normalized = tuple(Request.coerce(request) for request in requests)
+        policy = Policy.from_call(
+            on_miss=on_miss, force=force, force_deps=force_deps, deadline=deadline
+        )
+        walk = _Walk(mode="compute", policy=policy)
+
+        values: dict[int, Any] = {}
+        for index, request in enumerate(normalized):
+            rec = self.registry.get(request.recipe)
+            key = rec.bind(request.key)
+            try:
+                rows = self._resolve(
+                    walk, rec, key, request.part, force=force, policy=policy, is_root=True
+                )
+            except _Blocked:
+                continue
+            payload = self._payload(rows, request.part)
+            codec = get_codec(rec.codec)
+            values[index] = (
+                codec.decode(payload) if isinstance(payload, bytes) else codec.decode_parts(payload)
+            )
+
+        return BatchResult(
+            requests=normalized,
+            values=MappingProxyType(values),
+            missing=tuple(walk.missing),
+        )
+
+    def plan_many(
+        self,
+        requests: Sequence[Request | tuple[Any, ...]],
+        *,
+        on_miss: OnMiss = "compute",
+        force_deps: bool = False,
+    ) -> PlanReport:
+        """Walk many roots without computing, and report on all of them together."""
+        policy = Policy.from_call(on_miss=on_miss, force_deps=force_deps)
+        walk = _Walk(mode="plan", policy=policy)
+        for request in (Request.coerce(r) for r in requests):
+            rec = self.registry.get(request.recipe)
+            with contextlib.suppress(_Blocked):
+                self._resolve(
+                    walk,
+                    rec,
+                    rec.bind(request.key),
+                    request.part,
+                    force=False,
+                    policy=policy,
+                    is_root=True,
+                )
+        return PlanReport(
+            absent=tuple(walk.missing),
+            stale=tuple(walk.stale),
+            valid=tuple(walk.current),
+            nondeterministic=tuple(sorted(walk.nondeterministic)),
+        )
+
     def plan(
         self,
         recipe: str,
@@ -162,16 +247,8 @@ class Cache:
         continues through it — which is why the spec calls the declared graph the
         privileged case.
         """
-        rec = self.registry.get(recipe)
-        walk = _Walk(mode="plan", policy=Policy.from_call(on_miss=on_miss, force_deps=force_deps))
-        key = rec.bind(params)
-        with contextlib.suppress(_Blocked):
-            self._resolve(walk, rec, key, part, force=False, policy=walk.policy, is_root=True)
-        return PlanReport(
-            absent=tuple(walk.missing),
-            stale=tuple(walk.stale),
-            valid=tuple(walk.current),
-            nondeterministic=tuple(sorted(walk.nondeterministic)),
+        return self.plan_many(
+            [Request(recipe, params, part)], on_miss=on_miss, force_deps=force_deps
         )
 
     def query(self, recipe: str | None = None, **indexed_fields: Any) -> list[ArtifactRef]:

@@ -39,6 +39,28 @@ First working version, not yet published. Will be released as 0.1.0.
   hashes and for codec bytes checked into the test suite.
 - Two examples, one financial and one not, both exercised by the test suite.
 
+- `get_many` and `plan_many`: many roots in one walk, sharing a memo. A single root
+  stops at its first blocked `ctx.get`; independent roots do not stop each other, which
+  is what makes the spec's claim about cold runs — one report of everything that needs
+  ingesting — actually true.
+- `cache.stats`, and a `matview.scheduler` logger emitting one DEBUG event per node
+  resolved. The counters separate a plain hit from a revalidation-without-recompute
+  from a genuine rebuild, which a two-way hit/miss count hides.
+- `MissingNode.path`, the resolution chain from the root, so a protected miss says which
+  node wanted it rather than only that it is missing.
+- `SqliteStore` refuses a database whose `schema_version` it does not implement, as it
+  already did for `fingerprint_spec_version`.
+
+### Fixed
+
+- Enabling WAL could fail with "database is locked" when two processes opened the same
+  new file at the same moment. SQLite does not invoke the busy handler for a
+  journal-mode change, so `busy_timeout` did not cover it — the exact deployment the
+  design targets. Found by the first cross-process test.
+- `matview.__all__` named `CacheStats` and `BatchResult` without importing them, so
+  `from matview import CacheStats` raised. A test now checks every name in every
+  module's `__all__` actually resolves.
+
 ### Notes
 
 - Every choice made where the design document was silent is recorded, with its

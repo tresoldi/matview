@@ -121,6 +121,38 @@ discovered by execution: a recipe blocked on its first `ctx.get` has no value to
 continue with. Batching collects everything wherever the dependency set is knowable
 *without* running the recipe — stale verification, `plan()`, and foreign manifests.
 
+### Batches
+
+A single root stops at its first blocked `ctx.get`. Independent roots in one walk do
+not stop each other, which is what makes the cold-run story work:
+
+```python
+result = cache.get_many([("sharpe", {"symbol": s}) for s in universe])
+
+for index in result.resolved:
+    use(result[index])
+for node in result.missing:
+    print(node.describe())        # every symbol that needs ingesting, in one pass
+```
+
+`values` is keyed by request index rather than positional, because `None` is a
+legitimate value and "resolved to `None`" must not look like "did not resolve".
+`raise_if_missing()` gives back `get`'s all-or-nothing behaviour once you have looked
+at what did resolve. An exception raised by a recipe propagates immediately rather than
+being collected: a miss is a policy outcome, a traceback is a bug.
+
+Roots resolve in order, sharing one memo, so a dependency common to several of them is
+computed once. They are not run in parallel — see `DECISIONS.md` D33.
+
+Each request is a root, so a batch naming a protected recipe directly is an ingest
+script:
+
+```python
+cache.get_many([("ohlcv", {"symbol": s}) for s in universe], on_miss="compute")
+```
+
+`plan_many` is the same walk with nothing computed.
+
 ### `force` is local
 
 `force=True` recomputes that node only. If it were transitive, forcing one indicator

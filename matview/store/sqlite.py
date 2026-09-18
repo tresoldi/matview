@@ -15,8 +15,9 @@ import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from os import PathLike
-from typing import Any, Final
+from typing import Any, Final, cast
 
+from matview.canon import Scalar, index_value
 from matview.errors import ArtifactTooLarge, StoreError
 from matview.fingerprint import FINGERPRINT_SPEC_VERSION
 from matview.types import Artifact, ArtifactRef, DepEdge, StoreResult
@@ -212,7 +213,7 @@ class SqliteStore:
     def deps_of(self, artifact_id: int) -> list[DepEdge]:
         """The stored edges of one artifact: what it actually read, last time it ran."""
         rows = self._connect().execute(
-            "SELECT r.name, r.version, a.key_hash, a.part, d.dep_digest, a.id "
+            "SELECT r.name, r.version, a.key_hash, a.key_json, a.part, d.dep_digest, a.id "
             "FROM dep d JOIN artifact a ON a.id = d.dep_artifact_id "
             "JOIN recipe r ON r.id = a.recipe_id WHERE d.artifact_id = ?",
             (artifact_id,),
@@ -225,6 +226,7 @@ class SqliteStore:
                 part=row["part"],
                 digest=str(row["dep_digest"]),
                 artifact_id=int(row["id"]),
+                key_json=str(row["key_json"]),
             )
             for row in rows
         ]
@@ -254,7 +256,7 @@ class SqliteStore:
         for i, (field, value) in enumerate(sorted(indexed_fields.items())):
             joins.append(f"JOIN artifact_key k{i} ON k{i}.artifact_id = a.id")
             wheres.append(f"k{i}.field = ? AND k{i}.value = ?")
-            params.extend((field, _index_value(value)))
+            params.extend((field, index_value(cast(Scalar, value))))
         if recipe is not None:
             wheres.append("r.name = ?")
             params.append(recipe)
@@ -276,12 +278,51 @@ class SqliteStore:
     def store(self, artifact: Artifact, deps: Sequence[DepEdge]) -> StoreResult:
         """Artifact, dep edges and cascade in one transaction, or none of them.
 
-        The lookup below is `part IS ?` rather than a reliance on the schema's
+        The lookup is `part IS ?` rather than a reliance on the schema's
         UNIQUE (recipe_id, key_hash, part): SQLite treats NULLs as distinct in a UNIQUE
         index, so that constraint does not actually cover unpartitioned rows. Writers
         serialize on BEGIN IMMEDIATE, so select-then-write is safe across processes.
         See DECISIONS.md D23.
         """
+        self._check_size(artifact)
+        with self._transaction() as cur:
+            recipe_id = self._recipe_id(cur, artifact)
+            return self._store_one(cur, recipe_id, artifact, deps)
+
+    def store_parts(
+        self, artifacts: Sequence[Artifact], deps: Sequence[DepEdge]
+    ) -> list[StoreResult]:
+        """Every part of one value, in one transaction.
+
+        A codec that returns a dict produces several artifacts from a single compute.
+        They share a dep set and differ only in `part`, and a reader merging them must
+        never see half of a rewrite, so they land together. This is the partitioned
+        generalization of `store()`, which the spec fixes for the single-artifact case.
+        See DECISIONS.md D24.
+
+        Parts that this computation did *not* produce are removed. That is not
+        invalidation, which never deletes: it is a part that no longer exists, and
+        leaving it would let a whole-value read merge a phantom.
+        """
+        if not artifacts:
+            return []
+        first = artifacts[0]
+        for artifact in artifacts:
+            self._check_size(artifact)
+            if (artifact.recipe, artifact.version, artifact.key_hash) != (
+                first.recipe,
+                first.version,
+                first.key_hash,
+            ):
+                raise StoreError("store_parts writes parts of one value; these are not that")
+
+        with self._transaction() as cur:
+            recipe_id = self._recipe_id(cur, first)
+            results = [self._store_one(cur, recipe_id, a, deps) for a in artifacts]
+            self._prune_vanished_parts(cur, recipe_id, first.key_hash, [a.part for a in artifacts])
+            return results
+
+    def _check_size(self, artifact: Artifact) -> None:
         if artifact.n_bytes > self.max_artifact_bytes:
             raise ArtifactTooLarge(
                 f"{artifact.recipe} produced {artifact.n_bytes} bytes for part "
@@ -289,80 +330,100 @@ class SqliteStore:
                 f"This is a codec or partitioning problem, not a limit to raise reflexively."
             )
 
-        with self._transaction() as cur:
-            recipe_id = self._recipe_id(cur, artifact)
-            row = cur.execute(
-                "SELECT id, digest, fingerprint, valid FROM artifact "
-                "WHERE recipe_id = ? AND key_hash = ? AND part IS ?",
-                (recipe_id, artifact.key_hash, artifact.part),
-            ).fetchone()
+    def _store_one(
+        self, cur: sqlite3.Cursor, recipe_id: int, artifact: Artifact, deps: Sequence[DepEdge]
+    ) -> StoreResult:
+        row = cur.execute(
+            "SELECT id, digest, fingerprint, valid FROM artifact "
+            "WHERE recipe_id = ? AND key_hash = ? AND part IS ?",
+            (recipe_id, artifact.key_hash, artifact.part),
+        ).fetchone()
 
-            if (
-                row is not None
-                and row["digest"] == artifact.digest
-                and row["fingerprint"] == artifact.fingerprint
-            ):
-                return self._noop_write(cur, int(row["id"]), bool(row["valid"]), deps)
+        if (
+            row is not None
+            and row["digest"] == artifact.digest
+            and row["fingerprint"] == artifact.fingerprint
+        ):
+            return self._noop_write(cur, int(row["id"]), bool(row["valid"]), deps)
 
-            digest_changed = row is None or row["digest"] != artifact.digest
+        digest_changed = row is None or row["digest"] != artifact.digest
 
-            if row is None:
-                cur.execute(
-                    "INSERT INTO artifact (recipe_id, key_hash, key_json, part, digest, "
-                    "fingerprint, valid, n_bytes, data, computed_at, compute_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
-                    (
-                        recipe_id,
-                        artifact.key_hash,
-                        artifact.key_json,
-                        artifact.part,
-                        artifact.digest,
-                        artifact.fingerprint,
-                        artifact.n_bytes,
-                        artifact.data,
-                        artifact.computed_at,
-                        artifact.compute_ms,
-                    ),
-                )
-                artifact_id = int(cur.lastrowid or 0)
-            else:
-                artifact_id = int(row["id"])
-                cur.execute(
-                    "UPDATE artifact SET key_json = ?, digest = ?, fingerprint = ?, valid = 1, "
-                    "n_bytes = ?, data = ?, computed_at = ?, compute_ms = ? WHERE id = ?",
-                    (
-                        artifact.key_json,
-                        artifact.digest,
-                        artifact.fingerprint,
-                        artifact.n_bytes,
-                        artifact.data,
-                        artifact.computed_at,
-                        artifact.compute_ms,
-                        artifact_id,
-                    ),
-                )
-
-            cur.execute("DELETE FROM artifact_key WHERE artifact_id = ?", (artifact_id,))
-            for field, value in sorted(artifact.index_fields.items()):
-                cur.execute(
-                    "INSERT INTO artifact_key (artifact_id, field, value) VALUES (?, ?, ?)",
-                    (artifact_id, field, value),
-                )
-
-            self._insert_dep_edges(cur, artifact_id, deps)
-
-            invalidated = 0
-            if digest_changed and row is not None:
-                # A brand-new row cannot have dependents yet, so the cascade is only
-                # meaningful when an existing artifact's content actually changed.
-                invalidated = self._cascade(cur, artifact_id)
-
-            return StoreResult(
-                artifact_id=artifact_id,
-                written=True,
-                digest_changed=digest_changed,
-                invalidated=invalidated,
+        if row is None:
+            cur.execute(
+                "INSERT INTO artifact (recipe_id, key_hash, key_json, part, digest, "
+                "fingerprint, valid, n_bytes, data, computed_at, compute_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                (
+                    recipe_id,
+                    artifact.key_hash,
+                    artifact.key_json,
+                    artifact.part,
+                    artifact.digest,
+                    artifact.fingerprint,
+                    artifact.n_bytes,
+                    artifact.data,
+                    artifact.computed_at,
+                    artifact.compute_ms,
+                ),
             )
+            artifact_id = int(cur.lastrowid or 0)
+        else:
+            artifact_id = int(row["id"])
+            cur.execute(
+                "UPDATE artifact SET key_json = ?, digest = ?, fingerprint = ?, valid = 1, "
+                "n_bytes = ?, data = ?, computed_at = ?, compute_ms = ? WHERE id = ?",
+                (
+                    artifact.key_json,
+                    artifact.digest,
+                    artifact.fingerprint,
+                    artifact.n_bytes,
+                    artifact.data,
+                    artifact.computed_at,
+                    artifact.compute_ms,
+                    artifact_id,
+                ),
+            )
+
+        cur.execute("DELETE FROM artifact_key WHERE artifact_id = ?", (artifact_id,))
+        for field, value in sorted(artifact.index_fields.items()):
+            cur.execute(
+                "INSERT INTO artifact_key (artifact_id, field, value) VALUES (?, ?, ?)",
+                (artifact_id, field, value),
+            )
+
+        self._insert_dep_edges(cur, artifact_id, deps)
+
+        invalidated = 0
+        if digest_changed and row is not None:
+            # A brand-new row cannot have dependents yet, so the cascade is only
+            # meaningful when an existing artifact's content actually changed.
+            invalidated = self._cascade(cur, artifact_id)
+
+        return StoreResult(
+            artifact_id=artifact_id,
+            written=True,
+            digest_changed=digest_changed,
+            invalidated=invalidated,
+        )
+
+    def _prune_vanished_parts(
+        self, cur: sqlite3.Cursor, recipe_id: int, key_hash: str, kept: Sequence[str | None]
+    ) -> None:
+        rows = cur.execute(
+            "SELECT id, part FROM artifact WHERE recipe_id = ? AND key_hash = ?",
+            (recipe_id, key_hash),
+        ).fetchall()
+        keep = set(kept)
+        gone = [int(r["id"]) for r in rows if r["part"] not in keep]
+        if not gone:
+            return
+        dependents = self.dependents_of(gone)
+        if dependents:
+            placeholders = ",".join("?" * len(dependents))
+            cur.execute(f"UPDATE artifact SET valid = 0 WHERE id IN ({placeholders})", dependents)
+        placeholders = ",".join("?" * len(gone))
+        cur.execute(f"DELETE FROM dep WHERE dep_artifact_id IN ({placeholders})", gone)
+        cur.execute(f"DELETE FROM artifact WHERE id IN ({placeholders})", gone)
 
     def _noop_write(
         self, cur: sqlite3.Cursor, artifact_id: int, currently_valid: bool, deps: Sequence[DepEdge]
@@ -537,19 +598,6 @@ class SqliteStore:
                 ")",
                 (recipe, version, key_json, part, when, recipe, version, key_json, part),
             )
-
-
-def _index_value(value: object) -> str:
-    """Indexed key fields are promoted as their canonical JCS scalar rendering.
-
-    So `200` not `"200"`, and `true` not `"True"`, which keeps `query()` consistent
-    with `key_json`. See DECISIONS.md D8.
-    """
-    from matview.canon import jcs
-
-    if isinstance(value, str):
-        return value
-    return jcs(value).decode("utf-8")
 
 
 def _artifact_from_row(row: sqlite3.Row) -> Artifact:

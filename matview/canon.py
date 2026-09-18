@@ -15,7 +15,14 @@ import rfc8785
 
 from matview.errors import InvalidKey
 
-__all__ = ["RESERVED_KEY_FIELDS", "Scalar", "canonicalize_key", "jcs", "utf16_sort_key"]
+__all__ = [
+    "RESERVED_KEY_FIELDS",
+    "Scalar",
+    "canonicalize_key",
+    "index_value",
+    "jcs",
+    "utf16_sort_key",
+]
 
 Scalar = str | int | float | bool | None
 
@@ -94,3 +101,16 @@ def utf16_sort_key(value: str | None) -> tuple[int, bytes]:
     if value is None:
         return (0, b"")
     return (1, value.encode("utf-16-be"))
+
+
+def index_value(value: Scalar) -> str:
+    """Render a key field for promotion into `artifact_key`.
+
+    The column is `TEXT NOT NULL`, but indexed fields may be ints, floats or bools, so
+    they are stored as their canonical JCS scalar rendering: `200` not `"200"`, `true`
+    not `"True"`. That keeps `query()` consistent with `key_json` and the promotion
+    lossless. See DECISIONS.md D8.
+    """
+    if isinstance(value, str):
+        return value
+    return jcs(value).decode("utf-8")

@@ -18,12 +18,14 @@ and `ExceptionGroup`, which fits batched miss reporting. Supporting 3.10 costs a
 
 ## D2 — Packaging: `hatchling` + `uv`, src-less layout *(provisional)*
 
+Licensed MIT (confirmed).
+
 Distribution name `matview`, import name `matview` (spec fixes both). The name is
 unregistered on PyPI as of 2026-09-18. Codecs ship as extras: `matview[arrow]`,
 `matview[npy]`, `matview[json]` (json is stdlib-only and therefore always available;
 the extra exists only so the three read symmetrically), plus `matview[all]`.
 
-## D3 — JCS comes from the `rfc8785` package, not a hand-rolled serializer
+## D3 — JCS comes from the `rfc8785` package, not a hand-rolled serializer *(confirmed)*
 
 The spec fixes RFC 8785 as the canonicalization scheme and warns that two
 implementations disagreeing here fail silently. The hard part is ECMAScript number
@@ -81,3 +83,37 @@ One root means a caller can catch the library without catching everything.
 ## D10 — Logging via the stdlib, under the `matview` logger, no handler installed
 
 A library that configures logging is a library that fights its host.
+
+## D11 — Partitioned artifacts are read whole by default, via a codec merge hook *(confirmed)*
+
+The spec lets a codec return `dict[str, bytes]` for partitioned output but gives
+`decode` a single-bytes signature, gives `get()` no `part` argument, and specifies no
+way to put parts back together. The gap is closed on the codec side, where the spec
+already puts partitioning ("Partitioning is a codec concern, not a scheduler concern"):
+
+```python
+class Codec(Protocol):
+    name: str
+    def encode(self, value) -> bytes | dict[str, bytes]: ...
+    def decode(self, data: bytes) -> object: ...
+    def decode_parts(self, parts: dict[str, bytes]) -> object: ...   # partitioned codecs only
+```
+
+- `get(...)` with no `part` on a partitioned recipe fetches every part and calls
+  `decode_parts`, returning the whole value. Parts are passed in sorted-label order so
+  a merge cannot depend on fetch order.
+- `get(..., part="2026")` returns that one part, decoded with `decode`.
+- A dependent that selects a single part records a dep edge on **that part only**, so a
+  recipe reading one closed year is not invalidated by a write to the current year. A
+  dependent reading the whole value records one edge per part.
+- A codec that never partitions does not implement `decode_parts`; calling it is a
+  `CodecError`, not a silent fallback.
+
+`part` stays opaque to the scheduler throughout: the core sorts labels and counts edges,
+and never interprets them.
+
+## D12 — Delivery: stage by stage on one branch *(confirmed)*
+
+v1 is built in the spec's prescribed order on `claude/sleepy-planck-diq55j`, one commit
+per stage, each stage green before the next begins. The repository has no default-branch
+content, so there is nothing to merge into yet and no PR is opened until asked.

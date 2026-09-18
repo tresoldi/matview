@@ -318,3 +318,26 @@ def test_store_parts_refuses_artifacts_that_are_not_parts_of_one_value(store: Sq
 
 def test_store_parts_of_nothing_is_nothing(store: SqliteStore) -> None:
     assert store.store_parts([], ()) == []
+
+
+@pytest.mark.parametrize(
+    ("recorded", "match"),
+    [
+        ("99", "newer build"),
+        ("0", "no migration exists"),
+        ("not-a-number", "not a version number"),
+    ],
+)
+def test_a_file_from_a_different_schema_version_is_refused(tmp_path, recorded, match) -> None:
+    """Written and never read, this check was missing entirely.
+
+    A schema mismatch is the same class of hazard as a fingerprint spec mismatch: the
+    file opens, the queries run, and what they mean is not what the caller thinks.
+    """
+    path = tmp_path / "other-schema.db"
+    first = SqliteStore(path)
+    first._connect().execute("UPDATE meta SET v = ? WHERE k = 'schema_version'", (recorded,))
+    first.close()
+
+    with pytest.raises(Exception, match=match):
+        SqliteStore(path)

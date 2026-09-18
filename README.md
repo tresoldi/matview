@@ -96,7 +96,6 @@ uv run --extra npy   python examples/linguistics/pipeline.py    # a foreign reci
 | [`SPEC.md`](SPEC.md) | Canonicalization and fingerprints, verbatim and independently versioned. The cross-language interoperability contract. |
 | [`PLAN.md`](PLAN.md) | Build order, stage by stage, and the ten invariants with the test that pins each one. |
 | [`DECISIONS.md`](DECISIONS.md) | Every choice made where the spec was silent, with the reasoning. |
-| [`docs/ci-workflow.yml`](docs/ci-workflow.yml) | The intended `.github/workflows/ci.yml`, not yet installed in place. |
 
 `tests/golden_vectors.json` and `tests/golden_codecs.json` are fixed inputs to fixed
 digests. They are the regression guard on the interoperability contract and the

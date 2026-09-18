@@ -331,9 +331,17 @@ class Cache:
         walk.in_flight.add(node)
         started = time.monotonic()
         try:
-            if rec.fn is None:
-                raise MatviewError(f"{rec.name} has no Python implementation and no foreign runner")
-            value = rec.fn(ctx, **key)
+            if rec.foreign is not None:
+                # A foreign recipe's inputs are declared, not discovered, but they are
+                # resolved through the same ctx, so the ceiling, the deadline and the
+                # dep edges all behave identically.
+                from matview.foreign import run_foreign
+
+                value = run_foreign(self, walk, rec, key, ctx, collected, policy)
+            elif rec.fn is not None:
+                value = rec.fn(ctx, **key)
+            else:  # pragma: no cover - registration accepts neither
+                raise MatviewError(f"{rec.name} has neither a function nor a manifest")
         finally:
             walk.stack.pop()
             walk.in_flight.discard(node)

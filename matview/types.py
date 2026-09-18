@@ -15,6 +15,7 @@ from matview.canon import Scalar
 __all__ = [
     "Artifact",
     "ArtifactRef",
+    "CacheStats",
     "DepEdge",
     "MissingNode",
     "OnMiss",
@@ -169,3 +170,68 @@ class PlanReport:
         for ref in self.stale:
             lines.append(f"  stale   {ref.recipe}(v{ref.version}) {ref.key_json}")
         return "\n".join(lines)
+
+
+@dataclass(slots=True)
+class CacheStats:
+    """Cumulative counters for one `Cache`.
+
+    A cache that cannot tell you its hit rate is hard to trust, and the three outcomes
+    worth distinguishing are not obvious from the outside: a plain hit, a *stale*
+    artifact whose fingerprint still matched so its bytes were returned without
+    recomputing, and a genuine rebuild. The middle one is early cutoff doing its job,
+    and it is invisible in a two-way hit/miss count.
+
+    Counts are per node resolved, not per artifact row, so a partitioned value counts
+    once. They are incremented without a lock: under concurrent walks they may undercount
+    slightly, which is an acceptable trade for telemetry that costs nothing on the hot
+    path.
+    """
+
+    hits: int = 0
+    """Valid artifacts returned with no work at all."""
+
+    revalidated: int = 0
+    """Stale artifacts whose recomputed fingerprint matched, returned without recomputing."""
+
+    recomputed: int = 0
+    """Nodes whose recipe actually ran."""
+
+    blocked: int = 0
+    """Nodes that could not be produced under the effective policy."""
+
+    enqueued: int = 0
+    """Task rows written by `on_miss="enqueue"`."""
+
+    artifacts_written: int = 0
+    bytes_written: int = 0
+    compute_ms: int = 0
+    """Total recipe-body time, excluding dependency resolution."""
+
+    @property
+    def lookups(self) -> int:
+        return self.hits + self.revalidated + self.recomputed + self.blocked
+
+    @property
+    def hit_rate(self) -> float:
+        """The share of lookups answered from storage, revalidation included.
+
+        Revalidation counts as a hit because no recipe ran, which is the cost that
+        matters. Returns 0.0 when nothing has been looked up.
+        """
+        if not self.lookups:
+            return 0.0
+        return (self.hits + self.revalidated) / self.lookups
+
+    def reset(self) -> None:
+        for name in self.__slots__:
+            setattr(self, name, 0)
+
+    def describe(self) -> str:
+        return (
+            f"{self.lookups} lookups: {self.hits} hit, {self.revalidated} revalidated, "
+            f"{self.recomputed} recomputed, {self.blocked} blocked "
+            f"({self.hit_rate:.0%} hit rate); "
+            f"{self.artifacts_written} artifacts / {self.bytes_written} bytes written, "
+            f"{self.compute_ms} ms computing"
+        )

@@ -45,6 +45,7 @@ __all__ = [
     "ArtifactRef",
     "ArtifactTooLarge",
     "Cache",
+    "CacheStats",
     "Codec",
     "CodecError",
     "CycleError",

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -45,6 +46,7 @@ from matview.store.base import Store
 from matview.types import (
     Artifact,
     ArtifactRef,
+    CacheStats,
     DepEdge,
     MissingNode,
     OnMiss,
@@ -53,6 +55,10 @@ from matview.types import (
 )
 
 __all__ = ["Cache"]
+
+#: One event per node resolved, at DEBUG. No handler is installed: a library that
+#: configures logging is a library that fights its host.
+log = logging.getLogger("matview.scheduler")
 
 
 class _Blocked(Exception):
@@ -95,6 +101,8 @@ class Cache:
     def __init__(self, store: Store, *, registry: Registry | None = None) -> None:
         self.store = store
         self.registry = REGISTRY if registry is None else registry
+        #: Cumulative counters across every call on this cache. See `CacheStats`.
+        self.stats = CacheStats()
 
     # -- public API ---------------------------------------------------------
 
@@ -294,6 +302,8 @@ class Cache:
 
         if rows and not force_this:
             if all(row.valid for row in rows):
+                self.stats.hits += 1
+                log.debug("hit %s", walk.path[-1])
                 walk.current.extend(_as_refs(rows))
                 if walk.mode == "plan":
                     self._walk_stored_deps(walk, rows, policy)
@@ -305,6 +315,9 @@ class Cache:
                     if not row.valid:
                         self.store.revalidate(row.id or 0)
                 rows = [replace(row, valid=True) for row in rows]
+                self.stats.revalidated += 1
+                # Early cutoff doing its job: stale, verified, and not rebuilt.
+                log.debug("revalidated %s (fingerprint unchanged, not recomputed)", walk.path[-1])
                 return self._memoize(walk, node, rows)
             stale_and_wrong = True
 
@@ -341,10 +354,13 @@ class Cache:
                 return self._memoize(walk, node, rows)
             if effective == "enqueue":
                 self.store.enqueue(rec.name, rec.version, key_json, part, int(time.time()))
+                self.stats.enqueued += 1
             self._record_missing(walk, rec, key, part, effective)
             raise _Blocked
 
+        log.debug("recomputing %s", walk.path[-1])
         rows = self._compute(walk, rec, key, key_json, key_hash, part, policy)
+        self.stats.recomputed += 1
         if part is not None:
             rows = [row for row in rows if row.part == part]
             if not rows:
@@ -452,6 +468,17 @@ class Cache:
             )
             for label, data in payloads
         ]
+
+        self.stats.artifacts_written += len(artifacts)
+        self.stats.bytes_written += sum(a.n_bytes for a in artifacts)
+        self.stats.compute_ms += compute_ms
+        log.debug(
+            "computed %s in %d ms -> %d artifact(s), %d bytes",
+            rec.name,
+            compute_ms,
+            len(artifacts),
+            sum(a.n_bytes for a in artifacts),
+        )
 
         results = self.store.store_parts(artifacts, deps)
         return [replace(a, id=r.artifact_id) for a, r in zip(artifacts, results, strict=True)]
@@ -577,6 +604,8 @@ class Cache:
         if node in walk.missing_seen:
             return
         walk.missing_seen.add(node)
+        self.stats.blocked += 1
+        log.debug("blocked %s (%s)", walk.path[-1] if walk.path else rec.name, action)
         walk.missing.append(
             MissingNode(
                 recipe=rec.name,

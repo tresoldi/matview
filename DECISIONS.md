@@ -358,3 +358,25 @@ when the manifest loads, and call-time values when the recipe runs. Neither chec
 load-bearing for correctness: a value of the wrong type simply canonicalizes to a
 different key and therefore a different artifact. The checks exist to turn that into an
 error at the call rather than a mysteriously cold cache.
+
+## D32 — WAL is enabled with a retry, because `busy_timeout` does not cover it
+
+The spec requires WAL and excludes distributed locking, on the grounds that concurrent
+runners are handled by idempotent writes. Enabling WAL is itself the exception.
+
+Switching a database to WAL takes a brief exclusive lock, and SQLite does **not** invoke
+the busy handler for a journal-mode change. Two processes opening the same *new* file at
+the same instant therefore both attempt the switch, and the loser gets `SQLITE_BUSY`
+immediately, however large `busy_timeout` is. It fails before any of this library's own
+transactions are involved, so none of the care taken over `BEGIN IMMEDIATE` helps.
+
+This is not hypothetical: it is what the first run of the cross-process test did, on the
+very deployment the spec describes.
+
+`_enable_wal` therefore returns immediately when the mode is already `wal` — it is a
+persistent property of the file, so this is the case for every connection after the
+first — and otherwise retries until `busy_timeout` elapses. It checks the mode the pragma
+reports rather than the absence of an exception, because the pragma can decline to change
+the mode without raising.
+
+`busy_timeout` is also now set *before* the switch rather than after, and is configurable.

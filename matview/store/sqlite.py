@@ -25,7 +25,7 @@ from matview.types import Artifact, ArtifactRef, DepEdge, StoreResult
 
 __all__ = ["SCHEMA_VERSION", "SqliteStore"]
 
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 
 DEFAULT_MAX_ARTIFACT_BYTES: Final = 64 * 1024 * 1024
 
@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS artifact (
   n_bytes      INTEGER NOT NULL,
   data         BLOB NOT NULL,
   computed_at  INTEGER NOT NULL,
+  refreshed_at INTEGER NOT NULL,
   compute_ms   INTEGER,
   UNIQUE (recipe_id, key_hash, part)
 );
@@ -97,7 +98,7 @@ CREATE TABLE IF NOT EXISTS task (
 
 _ARTIFACT_COLUMNS: Final = """
   a.id, r.name, r.version, r.codec, a.key_hash, a.key_json, a.part,
-  a.digest, a.fingerprint, a.valid, a.n_bytes, a.computed_at, a.compute_ms
+  a.digest, a.fingerprint, a.valid, a.n_bytes, a.computed_at, a.refreshed_at, a.compute_ms
 """
 
 
@@ -428,15 +429,17 @@ class SqliteStore:
             and row["digest"] == artifact.digest
             and row["fingerprint"] == artifact.fingerprint
         ):
-            return self._noop_write(cur, int(row["id"]), bool(row["valid"]), deps)
+            return self._noop_write(
+                cur, int(row["id"]), bool(row["valid"]), artifact.refreshed_at, deps
+            )
 
         digest_changed = row is None or row["digest"] != artifact.digest
 
         if row is None:
             cur.execute(
                 "INSERT INTO artifact (recipe_id, key_hash, key_json, part, digest, "
-                "fingerprint, valid, n_bytes, data, computed_at, compute_ms) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                "fingerprint, valid, n_bytes, data, computed_at, refreshed_at, compute_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
                 (
                     recipe_id,
                     artifact.key_hash,
@@ -447,6 +450,7 @@ class SqliteStore:
                     artifact.n_bytes,
                     artifact.data,
                     artifact.computed_at,
+                    artifact.refreshed_at,
                     artifact.compute_ms,
                 ),
             )
@@ -455,7 +459,8 @@ class SqliteStore:
             artifact_id = int(row["id"])
             cur.execute(
                 "UPDATE artifact SET key_json = ?, digest = ?, fingerprint = ?, valid = 1, "
-                "n_bytes = ?, data = ?, computed_at = ?, compute_ms = ? WHERE id = ?",
+                "n_bytes = ?, data = ?, computed_at = ?, refreshed_at = ?, compute_ms = ? "
+                "WHERE id = ?",
                 (
                     artifact.key_json,
                     artifact.digest,
@@ -463,6 +468,7 @@ class SqliteStore:
                     artifact.n_bytes,
                     artifact.data,
                     artifact.computed_at,
+                    artifact.refreshed_at,
                     artifact.compute_ms,
                     artifact_id,
                 ),
@@ -510,7 +516,12 @@ class SqliteStore:
         cur.execute(f"DELETE FROM artifact WHERE id IN ({placeholders})", gone)
 
     def _noop_write(
-        self, cur: sqlite3.Cursor, artifact_id: int, currently_valid: bool, deps: Sequence[DepEdge]
+        self,
+        cur: sqlite3.Cursor,
+        artifact_id: int,
+        currently_valid: bool,
+        refreshed_at: int,
+        deps: Sequence[DepEdge],
     ) -> StoreResult:
         """Rule 4: a row whose digest and fingerprint already match is not rewritten.
 
@@ -521,6 +532,9 @@ class SqliteStore:
         Two corrections are still allowed here, and only these two. Neither writes the
         payload and neither cascades, which is what rule 4 protects. See DECISIONS.md D17.
         """
+        cur.execute(
+            "UPDATE artifact SET refreshed_at = ? WHERE id = ?", (refreshed_at, artifact_id)
+        )
         if not currently_valid:
             # A forced recompute has just proven this row current. Leaving it stale
             # would be a lie the next reader has to re-derive.
@@ -699,6 +713,7 @@ def _artifact_from_row(row: sqlite3.Row) -> Artifact:
         n_bytes=int(row["n_bytes"]),
         data=bytes(row["data"]),
         computed_at=int(row["computed_at"]),
+        refreshed_at=int(row["refreshed_at"]),
         compute_ms=None if row["compute_ms"] is None else int(row["compute_ms"]),
     )
 
@@ -716,5 +731,6 @@ def _ref_from_row(row: sqlite3.Row) -> ArtifactRef:
         valid=bool(row["valid"]),
         n_bytes=int(row["n_bytes"]),
         computed_at=int(row["computed_at"]),
+        refreshed_at=int(row["refreshed_at"]),
         compute_ms=None if row["compute_ms"] is None else int(row["compute_ms"]),
     )

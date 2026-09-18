@@ -75,6 +75,7 @@ def make_artifact(
         n_bytes=len(data),
         data=data,
         computed_at=int(time.time()),
+        refreshed_at=int(time.time()),
         compute_ms=1,
         index_fields=index_fields or {},
     )

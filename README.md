@@ -13,7 +13,10 @@ runs.
 ```python
 from matview import Cache, SqliteStore, recipe
 
-@recipe(version=1, codec="arrow", index=("symbol",), on_miss="raise", deterministic=False)
+@recipe(
+    version=1, codec="arrow", index=("symbol",), on_miss="raise",
+    deterministic=False, max_age=18 * 60 * 60,
+)
 def ohlcv(ctx, *, symbol: str, interval: str = "1d", adjust: str = "split"):
     return vendor.bars(symbol, interval, adjust)
 
@@ -69,6 +72,15 @@ in a single pass rather than one symbol per attempt.
 **`force` is local.** Forcing one indicator during development recomputes that node and
 nothing beneath it. `force_deps` is the transitive one, and the ceiling still applies
 under it.
+
+**Freshness is generic; scheduling is not.** A recipe may declare `max_age` in seconds.
+After that interval since its last successful computation, matview treats the value as
+needing recomputation. Successful checks advance a separate refresh clock even when the
+bytes are unchanged; `computed_at` retains its content-history meaning. Matview does not
+know about trading sessions, business days, or cron: callers decide when reads happen.
+Expiry is checked when that recipe is resolved; matview does not walk dependencies of
+every valid cache hit merely to inspect their clocks. A scheduler should therefore
+refresh source roots before asking for their derived values.
 
 **Deadlines, not budgets.** `deadline` is wall-clock seconds, converted to an absolute
 instant at the top-level call and carried down the recursion, because per-recipe cost

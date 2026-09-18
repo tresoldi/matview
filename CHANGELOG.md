@@ -16,6 +16,11 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Added
 
+- Generic recipe `max_age` freshness, backed by a distinct `refreshed_at` clock so a
+  successful refresh with unchanged bytes becomes fresh without rewriting content
+  history. Scheduling and domain calendars remain caller concerns. The new artifact
+  column advances the unreleased SQLite schema to version 2.
+
 - Content-addressed compute cache over a dependency graph discovered by execution: a
   suspending scheduler with constructive traces. Every `ctx.get` is recorded, and the
   artifact, its dep edges and the invalidation cascade land in one transaction.

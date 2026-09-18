@@ -414,3 +414,27 @@ Two further choices inside `BatchResult`:
 Note that each request in a batch is a *root*, so D27's exemption applies to it: naming
 a protected recipe directly is deliberate intent, which is what lets one batch call
 serve as an ingest script.
+
+## D34 — `max_age` uses a refresh clock, not `computed_at`
+
+A recipe may declare a positive integer `max_age` in seconds. At or beyond that age,
+matview treats its stored value as needing recomputation. This policy is deliberately
+generic: the caller owns schedules, calendars, and the meaning of an appropriate age.
+
+`computed_at` cannot carry this policy. Rule 4 preserves it when recomputation produces
+the same digest and fingerprint; using it for freshness would make an unchanged source
+refetch on every read after its first expiry. Artifacts therefore also carry
+`refreshed_at`, advanced after every successful computation, including an otherwise
+idempotent write. Payload bytes, digest, fingerprint, dependency edges, and
+`computed_at` remain untouched on that path.
+
+Expiry is ephemeral scheduler state, not dependency invalidation: it does not clear the
+stored `valid` bit or cascade. `plan()` nevertheless reports an expired artifact under
+`stale`, because it needs work before it is current for that read. An expired protected
+dependency obeys its `on_miss` ceiling and must be refreshed explicitly as a root.
+
+Expiry does not make every valid dependent read walk its stored graph: that would turn
+ordinary cache hits into graph traversals and quietly make a TTL transitive. Schedulers
+refresh age-limited source roots first; a changed digest then performs the ordinary
+invalidation cascade. If a walk reaches an expired dependency for another reason, its
+age and `on_miss` policy are still enforced.

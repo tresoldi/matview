@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -137,7 +138,9 @@ def test_rule04_idempotent_write_is_noop(store: SqliteStore) -> None:
     assert first_result.written is True
 
     # A duplicate runner recomputes the same value and writes it again.
-    again = make_artifact(recipe="r", data=b'{"a":1}')
+    again = replace(
+        make_artifact(recipe="r", data=b'{"a":1}'), refreshed_at=first.refreshed_at + 10
+    )
     again_result = store.store(again, ())
 
     assert again_result.written is False, "an identical write must not rewrite the row"
@@ -146,6 +149,7 @@ def test_rule04_idempotent_write_is_noop(store: SqliteStore) -> None:
 
     stored = store.fetch("r", 1, first.key_hash, None)
     assert stored.computed_at == first.computed_at, "computed_at must not be touched"
+    assert stored.refreshed_at == again.refreshed_at, "a successful check advances freshness"
 
 
 # ---------------------------------------------------------------------------

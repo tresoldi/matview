@@ -658,3 +658,100 @@ def test_a_plan_records_the_path_too(cache: Cache, registry: Registry) -> None:
     report = cache.plan("leaf")
     assert [step.split("(")[0] for step in report.absent[0].path] == ["leaf"]
     assert "wanted by" not in report.absent[0].describe(), "a root has nobody above it"
+
+
+# --- telemetry -------------------------------------------------------------
+
+
+def test_counters_distinguish_a_hit_from_a_revalidation_from_a_rebuild(
+    cache: Cache, registry: Registry
+) -> None:
+    """Two of those are free and one is not, and a hit/miss count hides the difference."""
+    scale = [1]
+
+    @recipe(version=1, codec="json", registry=registry)
+    def root(ctx, *, n: int = 1):
+        return {"v": n * scale[0]}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def leaf(ctx, *, n: int = 1):
+        return {"v": ctx.get("root", n=n)["v"] * 10}
+
+    cache.get("leaf")
+    assert (cache.stats.recomputed, cache.stats.hits) == (2, 0)
+    assert cache.stats.artifacts_written == 2
+    assert cache.stats.bytes_written > 0
+
+    cache.stats.reset()
+    cache.get("leaf")
+    assert (cache.stats.hits, cache.stats.recomputed) == (1, 0), "the root is never reached"
+    assert cache.stats.hit_rate == 1.0
+
+    # Change the root's bytes, then read the leaf: the leaf is stale and rebuilds.
+    cache.stats.reset()
+    scale[0] = 2
+    cache.get("root", force=True)
+    cache.get("leaf")
+    assert cache.stats.recomputed == 2, "the forced root, then the genuinely stale leaf"
+
+    # Now invalidate without changing anything: the leaf verifies and is not rebuilt.
+    cache.stats.reset()
+    cache.store.invalidate([cache.query(recipe="leaf")[0].id])
+    cache.get("leaf")
+    assert (cache.stats.revalidated, cache.stats.recomputed) == (1, 0)
+    assert cache.stats.hit_rate == 1.0, "revalidation is a hit: no recipe ran"
+    assert "revalidated" in cache.stats.describe()
+
+
+def test_blocked_and_enqueued_are_counted(cache: Cache, registry: Registry) -> None:
+    @recipe(version=1, codec="json", on_miss="enqueue", registry=registry)
+    def queued(ctx, *, symbol: str):
+        return {"bars": symbol}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def uses(ctx, *, symbol: str):
+        return ctx.get("queued", symbol=symbol)
+
+    with pytest.raises(MissingArtifacts):
+        cache.get("uses", symbol="AAPL")
+
+    assert cache.stats.blocked == 1
+    assert cache.stats.enqueued == 1
+    assert cache.stats.hit_rate == 0.0
+
+
+def test_an_empty_cache_reports_a_zero_hit_rate_rather_than_dividing_by_zero(
+    cache: Cache,
+) -> None:
+    assert cache.stats.lookups == 0
+    assert cache.stats.hit_rate == 0.0
+
+
+def test_the_scheduler_logs_one_event_per_node(
+    cache: Cache, registry: Registry, caplog: pytest.LogCaptureFixture
+) -> None:
+    @recipe(version=1, codec="json", registry=registry)
+    def root(ctx, *, n: int = 1):
+        return {"v": n}
+
+    @recipe(version=1, codec="json", registry=registry)
+    def leaf(ctx, *, n: int = 1):
+        return {"v": ctx.get("root", n=n)["v"] + 1}
+
+    with caplog.at_level("DEBUG", logger="matview.scheduler"):
+        cache.get("leaf")
+        cache.get("leaf")
+
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any(m.startswith("recomputing leaf") for m in messages)
+    assert any(m.startswith("recomputing root") for m in messages)
+    assert any(m.startswith("computed leaf in ") for m in messages)
+    assert any(m.startswith("hit leaf") for m in messages), "the second read"
+
+
+def test_the_library_installs_no_log_handler(cache: Cache, registry: Registry) -> None:
+    """A library that configures logging is a library that fights its host."""
+    import logging
+
+    for name in ("matview", "matview.scheduler", "matview.foreign"):
+        assert logging.getLogger(name).handlers == []

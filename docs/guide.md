@@ -265,6 +265,32 @@ cache.drop("sma", version=2)               # remove one version's artifacts
 cache.gc()                                 # drop superseded versions with no dependents
 ```
 
+## Observability
+
+Every node the scheduler resolves emits one DEBUG event on the `matview.scheduler`
+logger, and the same outcomes are counted cumulatively on the cache:
+
+```python
+cache.get("sharpe", symbol="AAPL")
+print(cache.stats.describe())
+# 3 lookups: 1 hit, 1 revalidated, 1 recomputed, 0 blocked (67% hit rate); ...
+```
+
+The three outcomes worth telling apart are not visible in a two-way hit/miss count:
+
+| Counter | Meaning |
+| --- | --- |
+| `hits` | Valid, returned with no work at all |
+| `revalidated` | Stale, fingerprint still matched, bytes returned **without** recomputing |
+| `recomputed` | The recipe actually ran |
+| `blocked` | Could not be produced under the effective policy |
+
+`revalidated` is early cutoff doing its job. `hit_rate` counts it as a hit, because no
+recipe ran and that is the cost that matters.
+
+No log handler is installed: a library that configures logging is a library that fights
+its host.
+
 ## Concurrency
 
 The SQLite connection is per-thread with WAL on, and writers serialize on

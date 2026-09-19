@@ -54,11 +54,19 @@ test-cov:  ## Run the suite with coverage
 # Byte-determinism has to hold across library versions, not just across runs on one
 # machine. A codec that drifts does not error: every artifact stored under it simply
 # stops being found, and the cache looks permanently cold.
+#
+# `--with .` installs matview itself. --no-project does not, and under the src/ layout
+# the working directory is no longer incidentally importable the way a flat layout was —
+# which is exactly how this job broke when the package moved.
+#
+# Caveat worth knowing: run from this directory, uv discovers the project's .venv and
+# layers it in, editable .pth and all, so a *local* run is not a true isolation check and
+# can mask a missing dependency. CI has no .venv, so it is the authority for this one.
+# `--with .` is what makes the environment right in both places.
 codec-floor:  ## Check the golden codec bytes under the oldest supported libraries
-	uv run --no-project \
+	uv run --no-project --with . \
 		--with 'polars==1.20.0' --with 'pyarrow==16.1.0' --with 'numpy==1.26.4' \
-		--with 'pandas==2.2.3' \
-		--with 'rfc8785>=0.1.4' --with 'pytest>=8.0' \
+		--with 'pandas==2.2.3' --with 'pytest>=8.0' \
 		python -m pytest tests/test_codecs.py -q
 
 check: quality test-core test-all codec-floor  ## Everything CI runs, locally

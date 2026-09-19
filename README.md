@@ -92,6 +92,20 @@ be cycle-checked and planned before anything executes. One JSON job file is the 
 argument; the result is read from a file, never from stdout, so a stray `print` cannot
 corrupt a value.
 
+## Inspecting a cache
+
+```bash
+matview info   --db cache.db      # what this file is, whatever version wrote it
+matview stats  --db cache.db
+matview ls     --db cache.db --recipe sma --invalid
+matview show   --db cache.db --id 12
+matview verify --db cache.db      # every payload against its recorded digest
+```
+
+Read-only, `--json` on everything, and no dependencies beyond the core. Metadata needs
+nothing imported; only a key given as partial parameters and `plan` need
+`--recipes MODULE`. See the [command line guide](https://tresoldi.github.io/matview/cli/).
+
 ## Examples
 
 Two, one financial and one not, to keep domain assumptions out of the core. Both run

@@ -44,6 +44,13 @@ First working version, not yet published. Will be released as 0.1.0.
   hashes and for codec bytes checked into the test suite.
 - Two examples, one financial and one not, both exercised by the test suite.
 
+- A `matview` command-line tool for inspecting a cache: `info`, `ls`, `show`, `stats`,
+  `verify`, `cat` and `plan`. Read-only, `--json` everywhere, stdlib-only so it is present
+  on a plain install. Metadata inspection imports nothing; `--recipes` is required only
+  for a partial key and for `plan`.
+- `SqliteStore(read_only=True)`, which requires the file to exist, creates no schema and
+  leaves the journal mode alone.
+- `inspect_database()`, which describes a database whatever version wrote it.
 - `get_many` and `plan_many`: many roots in one walk, sharing a memo. A single root
   stops at its first blocked `ctx.get`; independent roots do not stop each other, which
   is what makes the spec's claim about cold runs — one report of everything that needs

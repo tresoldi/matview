@@ -8,6 +8,7 @@ cutoff silently: nothing errors, the cascade simply never stops.
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 from pathlib import Path
 from typing import Any
@@ -20,19 +21,39 @@ from matview.errors import CodecError
 GOLDEN = Path(__file__).with_name("golden_codecs.json")
 
 
+#: Codecs whose `encode` returns a dict of parts rather than a single payload.
+PARTITIONING = {"arrow-year", "arrow-year-pandas"}
+
+
+def _encoded(codec: Any, value: Any) -> dict[str, bytes]:
+    """Normalize either shape of `encode` output to `{label: bytes}`, "" when unpartitioned."""
+    out = codec.encode(value)
+    return {"": out} if isinstance(out, bytes) else dict(out)
+
+
 def _sample(codec_name: str) -> Any:
     if codec_name == "json":
         return {"b": 1, "a": [1, 2.5, None, True], "z": "ü", "nested": {"y": 1, "x": 2}}
     if codec_name == "npy":
         np = pytest.importorskip("numpy")
         return np.arange(12, dtype="int64").reshape(3, 4)
-    columns = {
+    columns: dict[str, Any] = {
         "close": [1.0, 2.5, 3.0, -0.5],
         "volume": [10, 20, 30, 40],
         "symbol": ["AAPL", "AAPL", "AAPL", "AAPL"],
         "flag": [True, False, True, False],
     }
-    if codec_name == "arrow-pandas":
+    if codec_name in PARTITIONING:
+        columns = {
+            "date": [
+                datetime.date(2023, 12, 31),
+                datetime.date(2024, 1, 1),
+                datetime.date(2024, 7, 1),
+                datetime.date(2025, 2, 2),
+            ],
+            **columns,
+        }
+    if codec_name.endswith("pandas"):
         pd = pytest.importorskip("pandas")
         return pd.DataFrame(columns)
     pl = pytest.importorskip("polars")
@@ -47,6 +68,21 @@ def _codec(name: str) -> Any:
         pytest.skip(f"{name} extra not installed")
 
 
+def test_every_known_codec_has_a_golden_fixture() -> None:
+    """Guards two failures that otherwise pass silently.
+
+    A codec added without a fixture is never byte-checked at all. And because the tests
+    above parametrize over `CODEC_NAMES` from the *installed* package, an environment
+    holding a stale build simply generates fewer cases and reports success — which is
+    exactly what the codec-floor job did before it learned to refresh its build.
+    """
+    fixture = json.loads(GOLDEN.read_text(encoding="utf-8"))["codecs"]
+    assert set(CODEC_NAMES) == set(fixture), (
+        "the installed codec set and tests/golden_codecs.json disagree; either a codec "
+        "needs a fixture, or this environment is running a stale build of matview"
+    )
+
+
 @pytest.mark.parametrize("name", sorted(CODEC_NAMES))
 def test_golden_bytes_still_hold(name: str) -> None:
     """Fixed value, fixed bytes, checked in.
@@ -55,10 +91,9 @@ def test_golden_bytes_still_hold(name: str) -> None:
     artifact under this codec.
     """
     codec = _codec(name)
-    expected = json.loads(GOLDEN.read_text(encoding="utf-8"))["codecs"][name]
-    encoded = codec.encode(_sample(name))
-    assert isinstance(encoded, bytes)
-    assert encoded.hex() == expected["bytes_hex"], (
+    expected = json.loads(GOLDEN.read_text(encoding="utf-8"))["codecs"][name]["parts"]
+    actual = {label: data.hex() for label, data in _encoded(codec, _sample(name)).items()}
+    assert actual == expected, (
         f"{name} no longer produces the bytes it used to; every artifact stored under "
         f"it is now unreachable. This needs a migration, not a regenerated fixture."
     )
@@ -71,8 +106,7 @@ def test_no_timestamp_hostname_or_version_leaks_into_the_payload(name: str) -> N
     import socket
 
     codec = _codec(name)
-    encoded = codec.encode(_sample(name))
-    assert isinstance(encoded, bytes)
+    payloads = _encoded(codec, _sample(name))
 
     forbidden = [socket.gethostname().encode(), str(os.getpid()).encode()]
     for module in ("polars", "numpy", "pyarrow"):
@@ -80,14 +114,16 @@ def test_no_timestamp_hostname_or_version_leaks_into_the_payload(name: str) -> N
             forbidden.append(__import__(module).__version__.encode())
     for needle in forbidden:
         if len(needle) >= 3:
-            assert needle not in encoded, f"{name} leaked {needle!r} into the payload"
+            for label, data in payloads.items():
+                assert needle not in data, f"{name} leaked {needle!r} into part {label!r}"
 
 
 @pytest.mark.parametrize("name", sorted(CODEC_NAMES))
 def test_a_round_trip_preserves_the_value(name: str) -> None:
     codec = _codec(name)
     value = _sample(name)
-    decoded = codec.decode(codec.encode(value))  # type: ignore[arg-type]
+    payloads = _encoded(codec, value)
+    decoded = codec.decode_parts(payloads) if name in PARTITIONING else codec.decode(payloads[""])
 
     if name == "json":
         assert decoded == value
@@ -96,7 +132,7 @@ def test_a_round_trip_preserves_the_value(name: str) -> None:
 
         assert np.array_equal(decoded, value)
         assert decoded.dtype == value.dtype
-    elif name == "arrow-pandas":
+    elif name.endswith("pandas"):
         import pandas.testing as pdt
 
         pdt.assert_frame_equal(decoded, value, check_dtype=False)

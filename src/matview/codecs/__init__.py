@@ -66,7 +66,6 @@ class BaseCodec:
     """Shared behaviour. A codec that never partitions inherits the right refusal."""
 
     name: str = ""
-    partitions: bool = False
 
     def encode(self, value: object) -> bytes | dict[str, bytes]:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -82,13 +81,25 @@ class BaseCodec:
 
 
 #: Every codec name this build knows about, whether or not its extra is installed.
-CODEC_NAMES: Final = frozenset({"json", "arrow", "arrow-pandas", "arrow-series", "npy"})
+CODEC_NAMES: Final = frozenset(
+    {
+        "json",
+        "arrow",
+        "arrow-pandas",
+        "arrow-series",
+        "arrow-year",
+        "arrow-year-pandas",
+        "npy",
+    }
+)
 
 _BUILTIN_MODULES: Final = {
     "json": "matview.codecs._json",
     "arrow": "matview.codecs._arrow",
     "arrow-series": "matview.codecs._arrow",
     "arrow-pandas": "matview.codecs._arrow_pandas",
+    "arrow-year": "matview.codecs._arrow",
+    "arrow-year-pandas": "matview.codecs._arrow_pandas",
     "npy": "matview.codecs._npy",
 }
 
@@ -99,6 +110,8 @@ _EXTRAS: Final = {
     "arrow": "arrow",
     "arrow-series": "arrow",
     "arrow-pandas": "pandas",
+    "arrow-year": "arrow",
+    "arrow-year-pandas": "pandas",
     "npy": "npy",
 }
 

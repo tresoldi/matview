@@ -59,12 +59,17 @@ test-cov:  ## Run the suite with coverage
 # the working directory is no longer incidentally importable the way a flat layout was —
 # which is exactly how this job broke when the package moved.
 #
+# --refresh-package is load-bearing, not belt-and-braces: uv caches the wheel it builds
+# from `.` and will happily reinstall a stale one, so without it this job silently
+# verified an older matview. A job whose whole purpose is catching drift must not be able
+# to test yesterday's code. tests/test_codecs.py now also asserts that the installed
+# codec set matches the checked-in fixture, which fails loudly if this ever regresses.
+#
 # Caveat worth knowing: run from this directory, uv discovers the project's .venv and
 # layers it in, editable .pth and all, so a *local* run is not a true isolation check and
 # can mask a missing dependency. CI has no .venv, so it is the authority for this one.
-# `--with .` is what makes the environment right in both places.
 codec-floor:  ## Check the golden codec bytes under the oldest supported libraries
-	uv run --no-project --with . \
+	uv run --no-project --refresh-package matview --with . \
 		--with 'polars==1.20.0' --with 'pyarrow==16.1.0' --with 'numpy==1.26.4' \
 		--with 'pandas==2.2.3' --with 'pytest>=8.0' \
 		python -m pytest tests/test_codecs.py -q

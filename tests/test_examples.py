@@ -34,7 +34,9 @@ def test_the_financial_example_demonstrates_early_cutoff() -> None:
     output = run(EXAMPLES / "finance" / "pipeline.py")
 
     assert "(protected)" in output, "a permissive caller still cannot reach a protected root"
-    assert output.count("[fetch] ohlcv") == 2, "once to ingest, once when forced"
+    assert output.count("[fetch] ohlcv") == 3, (
+        "once to ingest, once for the revised old bar, once for the appended day"
+    )
 
     # The claim is about what happens *after* the old bar is revised, so read that
     # section rather than counting across the whole run.
@@ -47,6 +49,12 @@ def test_the_financial_example_demonstrates_early_cutoff() -> None:
     sharpes = [line for line in output.splitlines() if "'sharpe':" in line]
     assert len(sharpes) == 3
     assert len(set(sharpes)) == 1, "and the value is unchanged, which is why it was skipped"
+
+    # The year codec's own claim: appending a day leaves the closed years alone.
+    years = output.split("Appending one day")[1]
+    assert "2023  untouched" in years
+    assert "2024  untouched" in years
+    assert "2025  rewritten" in years
 
 
 def test_the_linguistics_example_plans_through_a_foreign_recipe() -> None:

@@ -564,3 +564,75 @@ only for a user. Under `src/` the tests exercise what is actually shipped.
 The move was held back until CI called `make` targets rather than spelling commands out,
 because it changes the path that gets type-checked and that path lives in one file now
 rather than in a workflow this account cannot push.
+
+## D42 — The calendar-year codec ships in matview, under the `arrow` extra
+
+The spec describes this codec and then says "None of this belongs in the core." It ships
+here anyway, as `arrow-year` and `arrow-year-pandas`, and the reasoning is that the
+sentence is about the *core* rather than about the distribution. The same spec says
+"partitioning is a codec concern, not a scheduler concern" and puts domain shape in the
+codec layer deliberately; codecs are optional extras that the domain-neutral core knows
+nothing about, and `part` stays an opaque label everywhere above them.
+
+The alternative — an example each consumer copies — means a codec written twice, and two
+copies of a byte-canonical encoding can disagree about bytes. That is the failure this
+library is most careful about everywhere else.
+
+It partitions on a column named `date` by default, so `arrow-year` works out of the box
+and `matview cat` can still decode a year-partitioned artifact with nothing imported
+(D37). Any other column name is a consumer-registered instance:
+
+    register_codec(ArrowYearCodec(name="bars-year", column="day"))
+
+Inference was rejected: if a recipe later grew a second date column, an inferring codec
+could pick differently and move every stored digest.
+
+Rows are sorted by the partitioning column before slicing, so a frame that is merely
+reordered encodes identically instead of churning every fingerprint above it. Arrow's sort
+is stable, so rows sharing a date keep their input order — which makes this canonical for
+the one-row-per-date case the design has, and the documentation claims no more than that.
+
+Timezone-aware timestamps are read **in UTC**. The same instant is 2023 in UTC and 2024 in
+Asia/Tokyo, so without a fixed rule a row near a year boundary would land in a different
+part depending on a column's timezone metadata. A `Date` column has no such ambiguity.
+
+Years are rejected if the column has nulls: a null date belongs to no year, and bucketing
+it anywhere would lose rows on the next read. Labels are zero-padded to four digits,
+because the core sorts parts as text and "999" sorts after "1000" without padding.
+
+## D43 — An empty frame stores unpartitioned, not as zero parts
+
+A year-partitioned value with no rows has no years. Returning `{}` would ask the store to
+write nothing at all, which `_persist` rightly refuses — but an empty series is a *value*,
+not a miss (rule 9), and a recipe is entitled to return one.
+
+So the year codecs return plain `bytes` for an empty frame, storing it as a single
+unpartitioned artifact, and a dict of parts otherwise. Both shapes are within the `Codec`
+protocol, which is `bytes | dict[str, bytes]` precisely because a codec may legitimately
+do either.
+
+The transition either way is handled by `store_parts` pruning what a recomputation no
+longer produces (D24): a series that becomes empty replaces its year parts with the single
+unpartitioned row, and one that fills up again replaces that row with year parts. Both
+directions are tested, because a stale unpartitioned row coexisting with year parts would
+make a whole-value read merge a phantom.
+
+## D44 — `BaseCodec.partitions` removed
+
+It was declared and read nowhere. `decode_parts` raising for a codec that does not
+partition is the actual mechanism, and a flag that nothing consults is a claim that can
+drift out of agreement with the behaviour it describes. A partitioning codec is evident
+from what `encode` returns.
+
+## D45 — The codec-floor job must refresh its build of matview
+
+`uv run --no-project --with .` caches the wheel it builds and will reinstall a stale one.
+This was not theoretical: after the `src/` move added `--with .`, the job silently verified
+an *older* matview, and the symptom was invisible — the tests parametrize over
+`CODEC_NAMES` from the installed package, so a stale build simply generates fewer cases and
+reports success.
+
+`--refresh-package matview` fixes the job. Because the failure mode is silence, there is
+also a test asserting that the installed codec set matches the checked-in fixture, which
+fails loudly if this regresses. A job whose entire purpose is catching drift must not be
+able to test yesterday's code.

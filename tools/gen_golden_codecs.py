@@ -23,9 +23,18 @@ OUT = Path(__file__).resolve().parents[1] / "tests" / "golden_codecs.json"
 
 
 def samples() -> dict[str, Any]:
+    import datetime as dt
+
     import numpy as np
     import pandas as pd
     import polars as pl
+
+    DATES = [
+        dt.date(2023, 12, 31),
+        dt.date(2024, 1, 1),
+        dt.date(2024, 7, 1),
+        dt.date(2025, 2, 2),
+    ]
 
     frame = pl.DataFrame(
         {
@@ -43,6 +52,11 @@ def samples() -> dict[str, Any]:
         # what pins the offset-width normalization.
         "arrow-pandas": pd.DataFrame(frame.to_dict(as_series=False)),
         "npy": np.arange(12, dtype="int64").reshape(3, 4),
+        # Spans three calendar years, so the fixture pins the part labels as well as the
+        # bytes, over the same columns as the unpartitioned entries above. The pandas
+        # entry must match it part for part.
+        "arrow-year": pl.DataFrame({"date": DATES}).hstack(frame),
+        "arrow-year-pandas": pd.DataFrame({"date": DATES, **frame.to_dict(as_series=False)}),
     }
 
 
@@ -66,8 +80,13 @@ def main() -> None:
     }
     for name, value in samples().items():
         encoded = get_codec(name).encode(value)
-        assert isinstance(encoded, bytes)
-        doc["codecs"][name] = {"n_bytes": len(encoded), "bytes_hex": encoded.hex()}
+        # Uniform shape: `parts` is keyed by part label, with "" for an unpartitioned
+        # codec, so the fixture and the test that reads it have one code path.
+        parts = {"": encoded} if isinstance(encoded, bytes) else encoded
+        doc["codecs"][name] = {
+            "parts": {label: data.hex() for label, data in sorted(parts.items())},
+            "n_bytes": sum(len(data) for data in parts.values()),
+        }
 
     OUT.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {OUT}")

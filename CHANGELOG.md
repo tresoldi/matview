@@ -44,6 +44,12 @@ First working version, not yet published. Will be released as 0.1.0.
   hashes and for codec bytes checked into the test suite.
 - Two examples, one financial and one not, both exercised by the test suite.
 
+- `arrow-year` and `arrow-year-pandas`, slicing a frame into one artifact per calendar
+  year on a column named `date`, with `ArrowYearCodec(name=..., column=...)` for any other
+  column. Byte-identical to each other, sorted so that a reordered frame encodes the same,
+  reading timezone-aware timestamps in UTC, and refusing null dates. Appending a day
+  rewrites one part and leaves the closed years untouched, which the tests assert end to
+  end rather than assuming.
 - An `arrow-pandas` codec, byte-identical to `arrow`, decoding to a pandas DataFrame.
   Either codec reads what the other wrote, so a cache is not partitioned by dataframe
   library, and a pandas consumer does not need polars installed.
@@ -71,6 +77,10 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Fixed
 
+- The codec-floor job silently verified a stale build of matview: `uv run --no-project
+  --with .` reinstalls a cached wheel. It refreshes the build now, and a test asserts the
+  installed codec set matches the checked-in fixture, because the symptom was invisible —
+  fewer parametrized cases, reported as success.
 - Arrow offset widths are now normalized, so the stored bytes no longer depend on which
   dataframe library produced the table. polars emits `large_string`, pandas 2.2 emits
   `string` and pandas 3.0 emits `large_string`, which made identical data hash differently
@@ -87,6 +97,8 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Changed
 
+- `BaseCodec.partitions` removed: it was read nowhere, and `decode_parts` refusing is the
+  actual mechanism.
 - The package now lives under `src/`, so the test suite exercises the installed
   distribution rather than the working directory and a packaging mistake fails locally
   rather than only for a user.

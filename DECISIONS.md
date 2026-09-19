@@ -669,3 +669,15 @@ The default is one sample, because creating or walking the full profile is delib
 a minutes-scale manual action and several listed operations mutate the fixture. Every
 result still uses the same median/p95 schema; callers can opt into more samples for
 read-only operations with `--repeats`.
+
+## D48 — Record short read samples, but single destructive samples
+
+The first 250k baseline uses five samples for warm reads, stale verification, queries,
+and listings; three for the larger batched scheduler walks; and one for cold write,
+verification, and destructive operations. The full fixture is deliberately minutes-scale
+to create or materially mutate, so repeated destructive runs would consume time while
+measuring different database states.
+
+Each result still records median and p95 together with its sample count. For a
+one-sample operation they are the same value, which is more honest than presenting a
+fabricated percentile or silently treating a mutation as repeatable.

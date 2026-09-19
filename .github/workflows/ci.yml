@@ -1,11 +1,3 @@
-# Intended contents of .github/workflows/ci.yml.
-#
-# It lives here rather than in place because the automation account that opened this
-# branch has no `workflow` OAuth scope and GitHub rejects any push that creates or
-# updates a file under .github/workflows/. Copy it across from a session that does:
-#
-#     mkdir -p .github/workflows && git mv docs/ci-workflow.yml .github/workflows/ci.yml
-#
 name: CI
 
 on:
@@ -18,49 +10,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
+  quality:
+    name: Lint, format & type check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.11
-      - run: uv run --extra dev ruff check .
-      - run: uv run --extra dev ruff format --check .
-      - run: uv run --extra dev mypy matview
+      - run: make quality
 
   test:
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install ${{ matrix.python-version }}
-      # --exact matters: without it uv leaves previously synced extras in the venv and
-      # this step silently tests the same environment as the next one.
-      - name: Test with the core only (no codec extras installed)
-        run: uv run --python ${{ matrix.python-version }} --extra dev --exact pytest
-      - name: Test with every codec extra installed
-        run: uv run --python ${{ matrix.python-version }} --all-extras pytest
+      - name: Core only, with no codec extras installed
+        run: make test-core
+      - name: With every codec extra installed
+        run: make test-all
 
-  # Byte-determinism has to hold across library versions, not just across runs on one
-  # machine. A codec that drifts does not error: every artifact stored under it simply
-  # stops being found, and the cache looks permanently cold. So the golden codec bytes
-  # are re-checked against the oldest supported libraries on every push.
-  #
-  # This is the job that would have caught polars' own IPC writer changing its metadata
-  # padding between 1.20 and 1.44. See DECISIONS.md D29.
   codec-determinism-floor:
+    name: Golden codec bytes under the oldest supported libraries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.11
-      - name: Golden codec bytes under the oldest supported libraries
-        run: |
-          uv run --python 3.11 --no-project \
-            --with 'polars==1.20.0' --with 'pyarrow==16.1.0' --with 'numpy==1.26.4' \
-            --with 'rfc8785>=0.1.4' --with 'pytest>=8.0' \
-            python -m pytest tests/test_codecs.py -q
+      - run: make codec-floor

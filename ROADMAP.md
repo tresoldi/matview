@@ -77,12 +77,18 @@ the core, and the same spec puts partitioning in the codec layer, where the doma
 core cannot see it. The write-amplification argument is asserted by tests at both the codec
 and the storage level rather than taken on trust.
 
-### Benchmarks at the spec's own scale
+### Benchmarks at the spec's own scale — planned, see [plans/250k-scale.md](plans/250k-scale.md)
 
 The design cites roughly 5,000 symbols and 50 indicators, which is 250,000 artifact
-rows. There are no measurements at all. `gc()` re-queries in a loop until it reaches a
-fixed point, and `dependents_of` builds an `IN` clause sized by its input. Both are fine
-at test scale and neither has been looked at under load.
+rows. There are no measurements at all.
+
+Investigating it found a defect rather than just slowness: seven `IN` clauses build one
+SQL placeholder per artifact id, and SQLite's compiled limit is 32,766 on builds since
+3.32 and 999 before that — so `drop()` over tens of thousands of artifacts is a hard
+failure on a plausible interpreter, not a slow one. `iter_payloads` also paginates with
+`OFFSET`, making `matview verify` quadratic. The plan, the measurements behind it, the
+settled decisions and the one question still open are written up in
+[plans/250k-scale.md](plans/250k-scale.md).
 
 ### A CLI — done
 

@@ -636,3 +636,18 @@ reports success.
 also a test asserting that the installed codec set matches the checked-in fixture, which
 fails loudly if this regresses. A job whose entire purpose is catching drift must not be
 able to test yesterday's code.
+
+## D46 — SQLite JSON1 is a required capability
+
+Scale-correct maintenance operations pass artifact IDs to SQLite as one JSON array and
+expand them with `json_each`, rather than creating one bound variable per ID. That avoids
+SQLite's variable limit everywhere the store removes, invalidates, or follows a large set
+of artifacts.
+
+`json_each` needs JSON1, which is included by default in SQLite 3.38 and later but is not
+guaranteed by every Python 3.11+ build. Supporting both JSON1 and no-JSON1 builds with a
+chunking fallback was rejected: it would restore the seven-call-site plumbing this design
+removes, while leaving a platform-specific path unexercised on any one machine. A store
+therefore probes JSON1 on every open, including read-only opens, and refuses with the
+linked SQLite version when unavailable. SQLite 3.38 is the documented floor for a build
+that provides JSON1 by default.

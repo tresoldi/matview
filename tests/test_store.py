@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 
 import pytest
 
 from matview import SqliteStore
-from matview.errors import ArtifactTooLarge
+from matview.errors import ArtifactTooLarge, StoreError
 from matview.fingerprint import FINGERPRINT_SPEC_VERSION
 from matview.store import SCHEMA_VERSION
 from matview.types import DepEdge
@@ -37,6 +38,17 @@ def _chain(store: SqliteStore, *, root_data: bytes = b'{"v":1}') -> tuple[int, i
     top = make_artifact(recipe="top", data=b'{"v":3}', deps=(_edge(middle, middle_id),))
     top_id = store.store(top, (_edge(middle, middle_id),)).artifact_id
     return root_id, middle_id, top_id
+
+
+def _many_ids(store: SqliteStore, *, recipe: str = "many", version: int = 1) -> list[int]:
+    return [
+        store.store(make_artifact(recipe=recipe, version=version, key={"n": n}), ()).artifact_id
+        for n in range(11)
+    ]
+
+
+def _lower_variable_limit(store: SqliteStore) -> None:
+    store._connect().setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 10)
 
 
 # --- schema ----------------------------------------------------------------
@@ -76,6 +88,30 @@ def test_each_thread_gets_its_own_connection(store: SqliteStore) -> None:
     thread.start()
     thread.join()
     assert seen and seen[0] != main
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+def test_open_refuses_a_sqlite_build_without_json1(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, read_only: bool
+) -> None:
+    path = tmp_path / "no-json1.db"
+    SqliteStore(path).close()
+    real_connect = sqlite3.connect
+
+    def connect_without_json1(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.set_authorizer(
+            lambda action, _arg1, _arg2, _database, _trigger: (
+                sqlite3.SQLITE_DENY
+                if action == sqlite3.SQLITE_READ and _arg1 == "json_each"
+                else sqlite3.SQLITE_OK
+            )
+        )
+        return conn
+
+    monkeypatch.setattr("matview.store.sqlite.sqlite3.connect", connect_without_json1)
+    with pytest.raises(StoreError, match=r"SQLite .*JSON1"):
+        SqliteStore(path, read_only=read_only)
 
 
 # --- reads and writes ------------------------------------------------------
@@ -198,6 +234,12 @@ def test_dependents_of_is_transitive_and_excludes_the_roots(store: SqliteStore) 
     assert store.dependents_of([]) == []
 
 
+def test_dependents_of_works_below_sqlite_variable_limit(store: SqliteStore) -> None:
+    ids = _many_ids(store)
+    _lower_variable_limit(store)
+    assert store.dependents_of(ids) == []
+
+
 def test_invalidate_is_transitive_and_revalidate_is_not(store: SqliteStore) -> None:
     root_id, middle_id, _top_id = _chain(store)
     assert store.invalidate([root_id]) == 3
@@ -207,6 +249,13 @@ def test_invalidate_is_transitive_and_revalidate_is_not(store: SqliteStore) -> N
     by_id = {ref.id: ref for ref in store.query()}
     assert by_id[root_id].valid is True
     assert by_id[middle_id].valid is False
+
+
+def test_invalidate_works_below_sqlite_variable_limit(store: SqliteStore) -> None:
+    ids = _many_ids(store)
+    _lower_variable_limit(store)
+    assert store.invalidate(ids) == len(ids)
+    assert not any(ref.valid for ref in store.query(recipe="many"))
 
 
 def test_drop_removes_a_version_and_marks_dependents_stale(store: SqliteStore) -> None:
@@ -226,12 +275,27 @@ def test_drop_one_version_leaves_the_others(store: SqliteStore) -> None:
     assert [ref.version for ref in store.query(recipe="r")] == [2]
 
 
+def test_drop_works_below_sqlite_variable_limit(store: SqliteStore) -> None:
+    _many_ids(store)
+    _lower_variable_limit(store)
+    assert store.drop("many") == 11
+    assert store.query(recipe="many") == []
+
+
 def test_gc_drops_superseded_versions_with_no_dependents(store: SqliteStore) -> None:
     store.store(make_artifact(recipe="r", version=1, data=b'{"v":1}'), ())
     store.store(make_artifact(recipe="r", version=2, data=b'{"v":2}'), ())
     assert store.gc() == 1
     assert [ref.version for ref in store.query(recipe="r")] == [2]
     assert store.gc() == 0, "idempotent"
+
+
+def test_gc_works_below_sqlite_variable_limit(store: SqliteStore) -> None:
+    _many_ids(store, recipe="many", version=1)
+    _many_ids(store, recipe="many", version=2)
+    _lower_variable_limit(store)
+    assert store.gc() == 11
+    assert {ref.version for ref in store.query(recipe="many")} == {2}
 
 
 def test_gc_keeps_a_superseded_version_that_something_still_depends_on(store: SqliteStore) -> None:
@@ -318,6 +382,31 @@ def test_store_parts_refuses_artifacts_that_are_not_parts_of_one_value(store: Sq
 
 def test_store_parts_of_nothing_is_nothing(store: SqliteStore) -> None:
     assert store.store_parts([], ()) == []
+
+
+def test_pruning_parts_works_below_sqlite_variable_limit(store: SqliteStore) -> None:
+    store.store_parts(
+        [make_artifact(recipe="parts", part=str(n), data=str(n).encode()) for n in range(12)], ()
+    )
+    _lower_variable_limit(store)
+    store.store_parts([make_artifact(recipe="parts", part="0", data=b"0")], ())
+    assert [
+        artifact.part for artifact in store.fetch_all_parts("parts", 1, make_artifact().key_hash)
+    ] == ["0"]
+
+
+def test_iter_payloads_walks_in_batches_without_offset(store: SqliteStore) -> None:
+    ids = _many_ids(store)
+    statements: list[str] = []
+    store._connect().set_trace_callback(statements.append)
+    try:
+        found = [
+            artifact_id for artifact_id, _digest, _data in store.iter_payloads("many", batch=2)
+        ]
+    finally:
+        store._connect().set_trace_callback(None)
+    assert found == ids
+    assert all(" OFFSET " not in statement.upper() for statement in statements)
 
 
 @pytest.mark.parametrize(

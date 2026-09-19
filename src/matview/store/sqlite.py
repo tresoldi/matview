@@ -10,6 +10,7 @@ later.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -102,6 +103,12 @@ _ARTIFACT_COLUMNS: Final = """
   a.id, r.name, r.version, r.codec, a.key_hash, a.key_json, a.part,
   a.digest, a.fingerprint, a.valid, a.n_bytes, a.computed_at, a.refreshed_at, a.compute_ms
 """
+
+
+def _id_set_predicate(artifact_ids: Sequence[int], *, negated: bool = False) -> tuple[str, str]:
+    """Render an ID membership predicate without one SQL variable per ID."""
+    not_ = "NOT " if negated else ""
+    return f"{not_}IN (SELECT value FROM json_each(?))", json.dumps(artifact_ids)
 
 
 class SqliteStore:
@@ -227,6 +234,14 @@ class SqliteStore:
         makes every lookup miss and look like an ordinary cold cache; a schema mismatch
         means operating against a shape that is not the one in front of us.
         """
+        try:
+            self._connect().execute("SELECT 1 FROM json_each(?) LIMIT 1", ("[]",)).fetchone()
+        except sqlite3.Error as exc:
+            raise StoreError(
+                f"{self.path} requires SQLite JSON1; linked SQLite is "
+                f"{sqlite3.sqlite_version}. Use SQLite 3.38 or newer."
+            ) from exc
+
         recorded = self.meta("fingerprint_spec_version")
         if recorded != str(FINGERPRINT_SPEC_VERSION):
             raise StoreError(
@@ -336,17 +351,18 @@ class SqliteStore:
         """Everything that transitively read these artifacts. Walks `dep_reverse`."""
         if not artifact_ids:
             return []
-        placeholders = ",".join("?" * len(artifact_ids))
+        roots_predicate, roots_json = _id_set_predicate(artifact_ids)
+        excluded_predicate, excluded_json = _id_set_predicate(artifact_ids, negated=True)
         rows = self._connect().execute(
             f"""
             WITH RECURSIVE affected(id) AS (
-              SELECT id FROM artifact WHERE id IN ({placeholders})
+              SELECT id FROM artifact WHERE id {roots_predicate}
               UNION
               SELECT d.artifact_id FROM dep d JOIN affected a ON d.dep_artifact_id = a.id
             )
-            SELECT id FROM affected WHERE id NOT IN ({placeholders}) ORDER BY id
+            SELECT id FROM affected WHERE id {excluded_predicate} ORDER BY id
             """,
-            (*artifact_ids, *artifact_ids),
+            (roots_json, excluded_json),
         )
         return [int(row["id"]) for row in rows]
 
@@ -529,16 +545,17 @@ class SqliteStore:
         if recipe is not None:
             sql += " WHERE r.name = ?"
             params.append(recipe)
-        sql += " ORDER BY a.id LIMIT ? OFFSET ?"
+        sql += " AND a.id > ?" if recipe is not None else " WHERE a.id > ?"
+        sql += " ORDER BY a.id LIMIT ?"
 
-        offset = 0
+        last_id = 0
         while True:
-            rows = conn.execute(sql, (*params, batch, offset)).fetchall()
+            rows = conn.execute(sql, (*params, last_id, batch)).fetchall()
             if not rows:
                 return
             for row in rows:
+                last_id = int(row["id"])
                 yield int(row["id"]), str(row["digest"]), bytes(row["data"])
-            offset += len(rows)
 
     def recipe_source_hash(self, recipe: str, version: int) -> str | None:
         """The advisory source hash last recorded for a recipe version, if any."""
@@ -706,11 +723,11 @@ class SqliteStore:
             return
         dependents = self.dependents_of(gone)
         if dependents:
-            placeholders = ",".join("?" * len(dependents))
-            cur.execute(f"UPDATE artifact SET valid = 0 WHERE id IN ({placeholders})", dependents)
-        placeholders = ",".join("?" * len(gone))
-        cur.execute(f"DELETE FROM dep WHERE dep_artifact_id IN ({placeholders})", gone)
-        cur.execute(f"DELETE FROM artifact WHERE id IN ({placeholders})", gone)
+            predicate, ids_json = _id_set_predicate(dependents)
+            cur.execute(f"UPDATE artifact SET valid = 0 WHERE id {predicate}", (ids_json,))
+        predicate, ids_json = _id_set_predicate(gone)
+        cur.execute(f"DELETE FROM dep WHERE dep_artifact_id {predicate}", (ids_json,))
+        cur.execute(f"DELETE FROM artifact WHERE id {predicate}", (ids_json,))
 
     def _noop_write(
         self,
@@ -810,10 +827,10 @@ class SqliteStore:
         if not artifact_ids:
             return 0
         ids = list(artifact_ids) + self.dependents_of(artifact_ids)
-        placeholders = ",".join("?" * len(ids))
+        predicate, ids_json = _id_set_predicate(ids)
         with self._transaction() as cur:
             cur.execute(
-                f"UPDATE artifact SET valid = 0 WHERE id IN ({placeholders}) AND valid = 1", ids
+                f"UPDATE artifact SET valid = 0 WHERE id {predicate} AND valid = 1", (ids_json,)
             )
             return int(cur.rowcount)
 
@@ -834,17 +851,18 @@ class SqliteStore:
             return 0
 
         dependents = [d for d in self.dependents_of(ids) if d not in set(ids)]
-        placeholders = ",".join("?" * len(ids))
+        ids_predicate, ids_json = _id_set_predicate(ids)
         with self._transaction() as cur:
             if dependents:
-                dep_placeholders = ",".join("?" * len(dependents))
+                dependents_predicate, dependents_json = _id_set_predicate(dependents)
                 cur.execute(
-                    f"UPDATE artifact SET valid = 0 WHERE id IN ({dep_placeholders})", dependents
+                    f"UPDATE artifact SET valid = 0 WHERE id {dependents_predicate}",
+                    (dependents_json,),
                 )
             # dep.dep_artifact_id has no ON DELETE CASCADE, by design: an edge must not
             # vanish quietly. Dropping is the one place it is meant to, so it is explicit.
-            cur.execute(f"DELETE FROM dep WHERE dep_artifact_id IN ({placeholders})", ids)
-            cur.execute(f"DELETE FROM artifact WHERE id IN ({placeholders})", ids)
+            cur.execute(f"DELETE FROM dep WHERE dep_artifact_id {ids_predicate}", (ids_json,))
+            cur.execute(f"DELETE FROM artifact WHERE id {ids_predicate}", (ids_json,))
             return len(ids)
 
     def gc(self) -> int:
@@ -870,10 +888,10 @@ class SqliteStore:
             ]
             if not ids:
                 return removed
-            placeholders = ",".join("?" * len(ids))
+            predicate, ids_json = _id_set_predicate(ids)
             with self._transaction() as cur:
-                cur.execute(f"DELETE FROM dep WHERE artifact_id IN ({placeholders})", ids)
-                cur.execute(f"DELETE FROM artifact WHERE id IN ({placeholders})", ids)
+                cur.execute(f"DELETE FROM dep WHERE artifact_id {predicate}", (ids_json,))
+                cur.execute(f"DELETE FROM artifact WHERE id {predicate}", (ids_json,))
             removed += len(ids)
 
     def enqueue(

@@ -82,13 +82,24 @@ class BaseCodec:
 
 
 #: Every codec name this build knows about, whether or not its extra is installed.
-CODEC_NAMES: Final = frozenset({"json", "arrow", "arrow-series", "npy"})
+CODEC_NAMES: Final = frozenset({"json", "arrow", "arrow-pandas", "arrow-series", "npy"})
 
 _BUILTIN_MODULES: Final = {
     "json": "matview.codecs._json",
     "arrow": "matview.codecs._arrow",
     "arrow-series": "matview.codecs._arrow",
+    "arrow-pandas": "matview.codecs._arrow_pandas",
     "npy": "matview.codecs._npy",
+}
+
+#: Which optional extra installs each codec. Not derivable from the name: `arrow-pandas`
+#: shares the Arrow encoding but needs pandas rather than polars.
+_EXTRAS: Final = {
+    "json": "json",
+    "arrow": "arrow",
+    "arrow-series": "arrow",
+    "arrow-pandas": "pandas",
+    "npy": "npy",
 }
 
 _REGISTRY: dict[str, Codec] = {}
@@ -116,7 +127,7 @@ def get_codec(name: str) -> Codec:
     try:
         importlib.import_module(module)
     except ImportError as exc:
-        extra = "arrow" if name.startswith("arrow") else name
+        extra = _EXTRAS.get(name, name)
         raise CodecUnavailable(
             f"codec {name!r} needs its optional extra: pip install 'matview[{extra}]' ({exc})"
         ) from exc

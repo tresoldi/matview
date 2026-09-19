@@ -29,7 +29,10 @@ class NpyCodec(BaseCodec):
 
     def encode(self, value: object) -> bytes | dict[str, bytes]:
         if not isinstance(value, np.ndarray):
-            raise CodecError(f"the npy codec encodes a numpy ndarray, got {type(value).__name__}")
+            raise CodecError(
+                f"the npy codec encodes a numpy ndarray, got "
+                f"{type(value).__module__}.{type(value).__qualname__}"
+            )
         if value.dtype.hasobject:
             raise CodecError(
                 "the npy codec refuses object arrays: storing one would mean serializing "

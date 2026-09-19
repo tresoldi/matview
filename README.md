@@ -49,6 +49,7 @@ Carte* (Mokhov, Mitchell, Peyton Jones): a suspending scheduler with constructiv
 ```bash
 pip install matview              # core: SQLite and the json codec, nothing heavy
 pip install 'matview[arrow]'     # polars DataFrames and Series via Arrow IPC
+pip install 'matview[pandas]'    # the same Arrow bytes, decoded to pandas
 pip install 'matview[npy]'       # numpy arrays
 pip install 'matview[all]'
 ```

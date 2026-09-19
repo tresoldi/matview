@@ -22,7 +22,7 @@ from matview.types import DepEdge
 
 from .conftest import make_artifact
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "matview"
+PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "src" / "matview"
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +230,9 @@ def _sample_for(codec_name: str) -> object:
     if codec_name == "npy":
         np = pytest.importorskip("numpy")
         return np.arange(12, dtype="int64").reshape(3, 4)
+    if codec_name == "arrow-pandas":
+        pd = pytest.importorskip("pandas")
+        return pd.DataFrame({"close": [1.0, 2.5, 3.0], "volume": [10, 20, 30]})
     if codec_name in {"arrow", "arrow-series"}:
         pl = pytest.importorskip("polars")
         frame = pl.DataFrame({"close": [1.0, 2.5, 3.0], "volume": [10, 20, 30]})

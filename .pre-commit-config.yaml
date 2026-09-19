@@ -38,5 +38,5 @@ repos:
     rev: v2.3.1
     hooks:
       - id: mypy
-        files: ^matview/
+        files: ^src/matview/
         additional_dependencies: ["rfc8785>=0.1.4"]

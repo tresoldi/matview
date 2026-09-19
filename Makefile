@@ -8,8 +8,10 @@
 .PHONY: help format quality format-check lint typecheck test test-core test-all \
         test-cov codec-floor docs docs-serve build clean install
 
-# The package path to lint and typecheck.
-PACKAGE := matview
+# The package path to lint and typecheck. Under src/ so that tests import the
+# *installed* package rather than the working directory: a packaging mistake — a missing
+# py.typed, an unshipped subpackage — then fails here rather than only for a user.
+PACKAGE := src/matview
 
 # `--exact` matters: without it uv leaves previously synced extras in the venv, and a
 # run meant to prove the core works without them silently tests the opposite.
@@ -47,7 +49,7 @@ test-core:  ## Run the suite with NO codec extras, which must also pass
 	$(CORE) pytest
 
 test-cov:  ## Run the suite with coverage
-	$(ALL) pytest --cov=$(PACKAGE) --cov-report=term-missing
+	$(ALL) pytest --cov=matview --cov-report=term-missing
 
 # Byte-determinism has to hold across library versions, not just across runs on one
 # machine. A codec that drifts does not error: every artifact stored under it simply
@@ -55,6 +57,7 @@ test-cov:  ## Run the suite with coverage
 codec-floor:  ## Check the golden codec bytes under the oldest supported libraries
 	uv run --no-project \
 		--with 'polars==1.20.0' --with 'pyarrow==16.1.0' --with 'numpy==1.26.4' \
+		--with 'pandas==2.2.3' \
 		--with 'rfc8785>=0.1.4' --with 'pytest>=8.0' \
 		python -m pytest tests/test_codecs.py -q
 

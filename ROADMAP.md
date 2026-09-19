@@ -104,11 +104,13 @@ normalization, scalar-only rejection).
 against it. A small documented runner — feed it vectors, report mismatches — is what
 turns that file from a regression test into an actual cross-language contract.
 
-### An `arrow-pandas` codec
+### An `arrow-pandas` codec — done
 
 argos, the first intended consumer, is pandas + pyarrow + duckdb; the `arrow` codec
-decodes to polars. The stored bytes would be identical either way, since the encoding
-already goes through pyarrow. **Open question for the author.**
+decodes to polars. Built, and the byte-identity claim turned out to need work first: the
+Arrow offset width was being chosen by whichever library produced the table, so identical
+data hashed differently under polars and pandas 2.2. Normalizing it (D39) made the claim
+true, and it is now pinned by golden fixtures and checked at the version floor.
 
 ---
 

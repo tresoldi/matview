@@ -24,6 +24,7 @@ OUT = Path(__file__).resolve().parents[1] / "tests" / "golden_codecs.json"
 
 def samples() -> dict[str, Any]:
     import numpy as np
+    import pandas as pd
     import polars as pl
 
     frame = pl.DataFrame(
@@ -38,12 +39,16 @@ def samples() -> dict[str, Any]:
         "json": {"b": 1, "a": [1, 2.5, None, True], "z": "ü", "nested": {"y": 1, "x": 2}},
         "arrow": frame,
         "arrow-series": frame["close"],
+        # The same logical table. Its bytes must equal the `arrow` entry above, which is
+        # what pins the offset-width normalization.
+        "arrow-pandas": pd.DataFrame(frame.to_dict(as_series=False)),
         "npy": np.arange(12, dtype="int64").reshape(3, 4),
     }
 
 
 def main() -> None:
     import numpy as np
+    import pandas as pd
     import polars as pl
 
     doc: dict[str, Any] = {
@@ -54,6 +59,7 @@ def main() -> None:
         ),
         "generated_with": {
             "polars": pl.__version__,
+            "pandas": pd.__version__,
             "numpy": np.__version__,
         },
         "codecs": {},

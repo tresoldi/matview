@@ -26,15 +26,17 @@ def _sample(codec_name: str) -> Any:
     if codec_name == "npy":
         np = pytest.importorskip("numpy")
         return np.arange(12, dtype="int64").reshape(3, 4)
+    columns = {
+        "close": [1.0, 2.5, 3.0, -0.5],
+        "volume": [10, 20, 30, 40],
+        "symbol": ["AAPL", "AAPL", "AAPL", "AAPL"],
+        "flag": [True, False, True, False],
+    }
+    if codec_name == "arrow-pandas":
+        pd = pytest.importorskip("pandas")
+        return pd.DataFrame(columns)
     pl = pytest.importorskip("polars")
-    frame = pl.DataFrame(
-        {
-            "close": [1.0, 2.5, 3.0, -0.5],
-            "volume": [10, 20, 30, 40],
-            "symbol": ["AAPL", "AAPL", "AAPL", "AAPL"],
-            "flag": [True, False, True, False],
-        }
-    )
+    frame = pl.DataFrame(columns)
     return frame["close"] if codec_name == "arrow-series" else frame
 
 
@@ -94,6 +96,10 @@ def test_a_round_trip_preserves_the_value(name: str) -> None:
 
         assert np.array_equal(decoded, value)
         assert decoded.dtype == value.dtype
+    elif name == "arrow-pandas":
+        import pandas.testing as pdt
+
+        pdt.assert_frame_equal(decoded, value, check_dtype=False)
     else:
         assert decoded.equals(value)
 
@@ -131,7 +137,7 @@ def test_wrong_types_are_refused_clearly(name: str) -> None:
         with pytest.raises(CodecError):
             codec.encode(object())
     else:
-        with pytest.raises(CodecError, match="got "):
+        with pytest.raises(CodecError, match=r"got builtins\.str"):
             codec.encode("not an array or a frame")
 
 
@@ -214,3 +220,67 @@ def test_an_empty_frame_is_a_value(store, registry) -> None:
     decoded = codec.decode(codec.encode(empty))  # type: ignore[arg-type]
     assert decoded.height == 0
     assert decoded.columns == ["a"]
+
+
+def test_arrow_and_arrow_pandas_produce_the_same_bytes() -> None:
+    """The same logical table has one canonical encoding, whichever library built it.
+
+    This is what the offset-width normalization in `_arrow_ipc` buys. Without it polars
+    writes `large_string` and pandas 2 writes `string`, so identical data stored through
+    the two codecs would carry different digests — and a pandas minor version bump would
+    silently move them. See DECISIONS.md D39.
+    """
+    pd = pytest.importorskip("pandas")
+    pl = pytest.importorskip("polars")
+
+    columns = {
+        "close": [1.0, 2.5, 3.0],
+        "volume": [10, 20, 30],
+        "symbol": ["AAPL", "MSFT", "NVDA"],
+        "flag": [True, False, True],
+        "tags": [["a", "b"], ["c"], []],
+    }
+    from_polars = _codec("arrow").encode(pl.DataFrame(columns))
+    from_pandas = _codec("arrow-pandas").encode(pd.DataFrame(columns))
+    assert from_polars == from_pandas
+
+
+def test_either_arrow_codec_reads_the_other_codecs_bytes() -> None:
+    """Two views of one stored form, so a cache is not partitioned by dataframe library."""
+    pd = pytest.importorskip("pandas")
+    pl = pytest.importorskip("polars")
+
+    columns = {"close": [1.0, 2.5], "symbol": ["AAPL", "MSFT"]}
+    written_by_polars = _codec("arrow").encode(pl.DataFrame(columns))
+    written_by_pandas = _codec("arrow-pandas").encode(pd.DataFrame(columns))
+
+    assert list(_codec("arrow-pandas").decode(written_by_polars).columns) == ["close", "symbol"]
+    assert _codec("arrow").decode(written_by_pandas).columns == ["close", "symbol"]
+
+
+def test_a_pandas_index_is_not_stored() -> None:
+    """An index is presentation, not data, and preserving it would add a column."""
+    pd = pytest.importorskip("pandas")
+    codec = _codec("arrow-pandas")
+    frame = pd.DataFrame({"a": [1, 2]}, index=["x", "y"])
+    assert codec.encode(frame) == codec.encode(pd.DataFrame({"a": [1, 2]}))
+    assert list(codec.decode(codec.encode(frame)).columns) == ["a"]  # type: ignore[arg-type]
+
+
+def test_arrow_pandas_accepts_a_series() -> None:
+    pd = pytest.importorskip("pandas")
+    codec = _codec("arrow-pandas")
+    decoded = codec.decode(codec.encode(pd.Series([1.0, 2.0], name="close")))  # type: ignore[arg-type]
+    assert list(decoded.columns) == ["close"]  # type: ignore[union-attr]
+
+
+def test_the_arrow_codecs_name_the_library_they_wanted() -> None:
+    """ "got DataFrame" cannot tell polars from pandas, which is the mistake being made."""
+    pd = pytest.importorskip("pandas")
+    pl = pytest.importorskip("polars")
+
+    # Matched on the library, not its internal module path, which moves between versions.
+    with pytest.raises(CodecError, match=r"got pandas\..*DataFrame"):
+        _codec("arrow").encode(pd.DataFrame({"a": [1]}))
+    with pytest.raises(CodecError, match=r"got polars\..*DataFrame"):
+        _codec("arrow-pandas").encode(pl.DataFrame({"a": [1]}))

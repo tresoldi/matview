@@ -38,6 +38,8 @@ deliberate: it is what buys early cutoff. The comment in the code says so; leave
 ## Conventions
 
 - Python 3.11+, `uv` for environments, `ruff` for lint and format, `mypy --strict`.
+- The package lives under `src/`, so the tests import the *installed* distribution rather
+  than the working directory. That is what makes a packaging mistake fail locally.
 - **Run `make check` before pushing.** It is what CI runs: `quality`, `test-core`,
   `test-all`, `codec-floor`. `make help` lists the rest.
 - The commands live in the `Makefile` and CI calls those targets, so changing how

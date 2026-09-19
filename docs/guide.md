@@ -230,8 +230,9 @@ declared.
 | Name | Encodes | Decodes to |
 | --- | --- | --- |
 | `json` | JSON-compatible values | `dict`, `list`, scalars |
-| `arrow` | polars `DataFrame` or `Series` | `DataFrame` |
-| `arrow-series` | polars `DataFrame` or `Series` | `Series` |
+| `arrow` | polars `DataFrame` or `Series` | polars `DataFrame` |
+| `arrow-series` | polars `DataFrame` or `Series` | polars `Series` |
+| `arrow-pandas` | pandas `DataFrame` or `Series` | pandas `DataFrame` |
 | `npy` | numpy `ndarray` | `ndarray` |
 
 Because fingerprints key on content digests, **a codec must produce identical bytes for
@@ -242,9 +243,22 @@ cutoff silently: nothing errors, the cascade simply never stops.
     It stamps a creation timestamp and writer version into the file, so two encodings of
     the same table differ and every downstream fingerprint changes for no reason.
 
-`arrow` and `arrow-series` share one encoding and differ only in what they decode to,
-rather than inspecting the table to guess — the codec is a property of the recipe, so
-decoding stays a lookup.
+The three Arrow codecs share **one** canonical encoding and differ only in what they
+decode to, rather than inspecting the table to guess — the codec is a property of the
+recipe, so decoding stays a lookup. Either can read what another wrote, so a cache is not
+partitioned by which dataframe library a recipe happens to use:
+
+```python
+cache.get_bytes("bars", symbol="AAPL")   # the same bytes, whichever codec wrote them
+```
+
+That holds because the encoding pins what the producing library would otherwise choose
+for itself. `string` and `large_string` differ only in offset width, and polars, pandas 2
+and pandas 3 do not agree on which to emit; matview normalizes to the wide variant so the
+digest depends on the data and not on a dependency's minor version. A dictionary
+(categorical) column's index width is *not* normalized, because it varies with cardinality
+and so is data rather than encoding — cast it explicitly if you need a
+producer-independent digest for one.
 
 ### Writing one
 

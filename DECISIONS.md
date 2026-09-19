@@ -510,3 +510,57 @@ version checks. Write methods raise rather than surfacing a raw SQLite error.
 
 It is on the store rather than in the CLI because the guarantee belongs to whatever holds
 the connection, and because a replication or audit tool would want exactly the same thing.
+
+## D39 — Arrow offset widths are normalized, so the producing library cannot pick them
+
+`string`/`large_string`, `binary`/`large_binary` and `list`/`large_list` differ only in
+whether offsets are 32- or 64-bit. There is no semantic difference between them, and each
+dataframe library picks a side without being asked: polars 1.x produces `large_string`,
+pandas 2.2 produces `string`, pandas 3.0 produces `large_string`.
+
+Measured, for one three-column table: polars and pandas 3.0.6 agree at 560 bytes, while
+pandas 2.2.3 produces 552. Nothing errors. This is the same class of problem as D29 — the
+bytes were being decided by a dependency rather than by matview — with the added sting
+that a *pandas minor version* moves them.
+
+`_arrow_ipc.widen()` therefore normalizes those three pairs to the large variant,
+recursively through structs, maps and lists, before the stream is written. Verified
+byte-identical across polars 1.20/1.44 and pandas 2.2.3/3.0.6, and the golden fixtures pin
+`arrow` and `arrow-pandas` to the same bytes so it cannot drift back.
+
+Crucially, this changed **nothing** already stored: polars was already producing the large
+variants, so the normalization is a no-op on that path and every existing digest holds.
+Had it gone the other way it would have needed a `fingerprint_spec_version` bump.
+
+A dictionary type's index width is deliberately *not* normalized. It varies with
+cardinality, so it is data rather than an encoding choice, and pinning one width would
+make every categorical column pay for the widest case. A recipe that wants a
+producer-independent digest for a categorical should cast it explicitly.
+
+## D40 — `arrow-pandas` is a separate module, not a branch in the polars codec
+
+argos, the first consumer, is pandas/pyarrow/duckdb. A pandas user should not have to
+install polars to read their own cache, so the pandas codec lives in its own module
+importing only pandas and pyarrow, and the shared encoding lives in `_arrow_ipc`, which
+imports only pyarrow. `get_codec` maps each codec name to the extra that installs it
+explicitly, because `arrow-pandas` shares the Arrow encoding but needs a different library
+and the old `name.startswith("arrow")` rule would have advised the wrong one.
+
+Because the encoding is shared and offset widths are pinned (D39), `arrow` and
+`arrow-pandas` are two views of one stored form: either can read what the other wrote, and
+a cache is not partitioned by which dataframe library a recipe happens to use.
+
+A pandas index is not preserved. It is presentation rather than data, and
+`preserve_index=True` would add a column *and* write pandas metadata into the schema —
+putting the producing library back into the digest, which is the thing D39 removes.
+
+## D41 — The package lives under `src/`
+
+Without it, `pytest` run from the repository root imports the working-directory copy
+rather than the installed distribution, so a packaging mistake — a missing `py.typed`, an
+unshipped subpackage, a module absent from the wheel — passes every local check and fails
+only for a user. Under `src/` the tests exercise what is actually shipped.
+
+The move was held back until CI called `make` targets rather than spelling commands out,
+because it changes the path that gets type-checked and that path lives in one file now
+rather than in a workflow this account cannot push.

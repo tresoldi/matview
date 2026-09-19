@@ -44,6 +44,9 @@ First working version, not yet published. Will be released as 0.1.0.
   hashes and for codec bytes checked into the test suite.
 - Two examples, one financial and one not, both exercised by the test suite.
 
+- An `arrow-pandas` codec, byte-identical to `arrow`, decoding to a pandas DataFrame.
+  Either codec reads what the other wrote, so a cache is not partitioned by dataframe
+  library, and a pandas consumer does not need polars installed.
 - A `matview` command-line tool for inspecting a cache: `info`, `ls`, `show`, `stats`,
   `verify`, `cat` and `plan`. Read-only, `--json` everywhere, stdlib-only so it is present
   on a plain install. Metadata inspection imports nothing; `--recipes` is required only
@@ -68,6 +71,12 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Fixed
 
+- Arrow offset widths are now normalized, so the stored bytes no longer depend on which
+  dataframe library produced the table. polars emits `large_string`, pandas 2.2 emits
+  `string` and pandas 3.0 emits `large_string`, which made identical data hash differently
+  by producer and moved with a pandas *minor* version. Nothing already stored changed:
+  polars was already producing the wide variants, so the normalization is a no-op on that
+  path and every existing digest holds.
 - Enabling WAL could fail with "database is locked" when two processes opened the same
   new file at the same moment. SQLite does not invoke the busy handler for a
   journal-mode change, so `busy_timeout` did not cover it — the exact deployment the
@@ -75,6 +84,12 @@ First working version, not yet published. Will be released as 0.1.0.
 - `matview.__all__` named `CacheStats` and `BatchResult` without importing them, so
   `from matview import CacheStats` raised. A test now checks every name in every
   module's `__all__` actually resolves.
+
+### Changed
+
+- The package now lives under `src/`, so the test suite exercises the installed
+  distribution rather than the working directory and a packaging mistake fails locally
+  rather than only for a user.
 
 ### Notes
 

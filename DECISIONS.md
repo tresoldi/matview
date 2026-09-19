@@ -651,3 +651,21 @@ removes, while leaving a platform-specific path unexercised on any one machine. 
 therefore probes JSON1 on every open, including read-only opens, and refuses with the
 linked SQLite version when unavailable. SQLite 3.38 is the documented floor for a build
 that provides JSON1 by default.
+
+## D47 — The scale harness runs one named operation at a time
+
+The scale harness has a `cold-write` operation that creates the database, then exposes
+every measurement as a separately named operation against that existing file. That keeps
+iteration on one operation from rebuilding a 250k-artifact fixture each time, and makes
+the state change of `cascade`, `drop`, and `gc` explicit rather than concealing it in an
+all-in-one benchmark run.
+
+The generated graph has one protected root shared by every indicator, and one aggregate
+per symbol over its indicators. This gives the cascade measurement a genuine wide fan-out
+while retaining a finance-shaped symbols × indicators row count. A small pair of legacy
+versions is included solely to give `gc()` candidates while it scans the full database.
+
+The default is one sample, because creating or walking the full profile is deliberately
+a minutes-scale manual action and several listed operations mutate the fixture. Every
+result still uses the same median/p95 schema; callers can opt into more samples for
+read-only operations with `--repeats`.

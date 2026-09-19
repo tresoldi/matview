@@ -13,9 +13,11 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator, Sequence
+import urllib.parse
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from os import PathLike
+from pathlib import Path
 from typing import Any, Final, cast
 
 from matview.canon import Scalar, index_value
@@ -23,7 +25,7 @@ from matview.errors import ArtifactTooLarge, StoreError
 from matview.fingerprint import FINGERPRINT_SPEC_VERSION
 from matview.types import Artifact, ArtifactRef, DepEdge, StoreResult
 
-__all__ = ["SCHEMA_VERSION", "SqliteStore"]
+__all__ = ["SCHEMA_VERSION", "SqliteStore", "inspect_database"]
 
 SCHEMA_VERSION: Final = 2
 
@@ -111,10 +113,22 @@ class SqliteStore:
         *,
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
+        read_only: bool = False,
     ) -> None:
+        """Open a cache database, creating it if it does not exist.
+
+        `read_only=True` opens it through SQLite's `mode=ro`, requires the file to
+        already exist, and creates nothing — no schema, no WAL sidecar, no journal-mode
+        change. An inspection tool needs that: a plain open creates a database on a
+        mistyped path and reports it as empty, and switching someone's journal mode while
+        they are diagnosing a problem is not a read. See DECISIONS.md D38.
+        """
         self.path = str(path)
         self.max_artifact_bytes = max_artifact_bytes
         self.busy_timeout_ms = busy_timeout_ms
+        self.read_only = read_only
+        if read_only and not Path(self.path).exists():
+            raise StoreError(f"{self.path} does not exist")
         self._local = threading.local()
         self._init_lock = threading.Lock()
         self._initialized = False
@@ -126,15 +140,26 @@ class SqliteStore:
         conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
         if conn is not None:
             return conn
-        conn = sqlite3.connect(self.path, isolation_level=None)
+        if self.read_only:
+            conn = sqlite3.connect(
+                f"file:{urllib.parse.quote(self.path)}?mode=ro", uri=True, isolation_level=None
+            )
+        else:
+            conn = sqlite3.connect(self.path, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
-        self._enable_wal(conn)
-        conn.execute("PRAGMA foreign_keys = ON")
+        if not self.read_only:
+            # Both of these write: the journal-mode switch to the file header, and
+            # foreign_keys only matters where there are writes to constrain.
+            self._enable_wal(conn)
+            conn.execute("PRAGMA foreign_keys = ON")
         self._local.conn = conn
         with self._init_lock:
             if not self._initialized:
-                self._create_schema(conn)
+                if self.read_only:
+                    self._check_versions()
+                else:
+                    self._create_schema(conn)
                 self._initialized = True
         return conn
 
@@ -235,6 +260,8 @@ class SqliteStore:
     def _transaction(self) -> Iterator[sqlite3.Cursor]:
         """One write, one transaction. A reader must never see an artifact whose dep
         edges have not landed, so everything a write touches happens in here."""
+        if self.read_only:
+            raise StoreError(f"{self.path} was opened read-only; this store cannot write")
         conn = self._connect()
         conn.execute("BEGIN IMMEDIATE")
         cur = conn.cursor()
@@ -342,6 +369,176 @@ class SqliteStore:
         sql.append("ORDER BY r.name, a.key_hash, a.part IS NOT NULL, a.part")
         rows = self._connect().execute(" ".join(sql), params).fetchall()
         return [_ref_from_row(row) for row in rows]
+
+    def list_refs(
+        self,
+        recipe: str | None = None,
+        *,
+        version: int | None = None,
+        part: str | None = None,
+        valid: bool | None = None,
+        fields: Mapping[str, str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ArtifactRef]:
+        """List artifacts with the filters an inspection tool needs.
+
+        Separate from `query()` rather than an extension of it: `query()` is the seam the
+        spec fixes, and its `**indexed_fields` signature has no room for a `limit` or a
+        `valid` filter without a caller's field name colliding with an option name.
+        """
+        joins: list[str] = []
+        wheres: list[str] = []
+        params: list[Any] = []
+        for i, (field, value) in enumerate(sorted((fields or {}).items())):
+            joins.append(f"JOIN artifact_key k{i} ON k{i}.artifact_id = a.id")
+            wheres.append(f"k{i}.field = ? AND k{i}.value = ?")
+            params.extend((field, value))
+        if recipe is not None:
+            wheres.append("r.name = ?")
+            params.append(recipe)
+        if version is not None:
+            wheres.append("r.version = ?")
+            params.append(version)
+        if part is not None:
+            wheres.append("a.part IS ?")
+            params.append(part)
+        if valid is not None:
+            wheres.append("a.valid = ?")
+            params.append(1 if valid else 0)
+
+        sql = [f"SELECT {_ARTIFACT_COLUMNS} FROM artifact a JOIN recipe r ON r.id = a.recipe_id"]
+        sql.extend(joins)
+        if wheres:
+            sql.append("WHERE " + " AND ".join(wheres))
+        sql.append("ORDER BY r.name, r.version, a.key_json, a.part IS NOT NULL, a.part")
+        if limit is not None:
+            sql.append("LIMIT ? OFFSET ?")
+            params.extend((limit, offset))
+        return [_ref_from_row(row) for row in self._connect().execute(" ".join(sql), params)]
+
+    def ref_by_id(self, artifact_id: int) -> ArtifactRef | None:
+        """One artifact's metadata by row id, without needing to know its key."""
+        row = (
+            self._connect()
+            .execute(
+                f"SELECT {_ARTIFACT_COLUMNS} FROM artifact a "
+                "JOIN recipe r ON r.id = a.recipe_id WHERE a.id = ?",
+                (artifact_id,),
+            )
+            .fetchone()
+        )
+        return None if row is None else _ref_from_row(row)
+
+    def fetch_by_id(self, artifact_id: int) -> Artifact | None:
+        """One artifact including its payload, by row id."""
+        row = (
+            self._connect()
+            .execute(
+                f"SELECT {_ARTIFACT_COLUMNS}, a.data FROM artifact a "
+                "JOIN recipe r ON r.id = a.recipe_id WHERE a.id = ?",
+                (artifact_id,),
+            )
+            .fetchone()
+        )
+        return None if row is None else _artifact_from_row(row)
+
+    def refs_by_key_hash(self, key_hash: str, recipe: str | None = None) -> list[ArtifactRef]:
+        """Every artifact under one key hash, across recipes, versions and parts.
+
+        A key hash is not unique on its own: the same parameters can be shared by several
+        recipes, and a version bump leaves the old artifact in place.
+        """
+        sql = (
+            f"SELECT {_ARTIFACT_COLUMNS} FROM artifact a "
+            "JOIN recipe r ON r.id = a.recipe_id WHERE a.key_hash = ?"
+        )
+        params: list[Any] = [key_hash]
+        if recipe is not None:
+            sql += " AND r.name = ?"
+            params.append(recipe)
+        sql += " ORDER BY r.name, r.version, a.part IS NOT NULL, a.part"
+        return [_ref_from_row(row) for row in self._connect().execute(sql, params)]
+
+    def recipe_rows(self) -> list[dict[str, Any]]:
+        """Every recipe version the database knows about, with its artifact count.
+
+        Read from the `recipe` table, so it answers what is *stored* rather than what is
+        registered in this process. A version present here with no registered recipe is
+        exactly the situation the CLI exists to make visible.
+        """
+        rows = self._connect().execute(
+            """
+            SELECT r.name, r.version, r.codec, r.source_hash,
+                   COUNT(a.id) AS artifacts,
+                   COALESCE(SUM(a.n_bytes), 0) AS n_bytes,
+                   COALESCE(SUM(a.valid = 0), 0) AS invalid
+            FROM recipe r LEFT JOIN artifact a ON a.recipe_id = r.id
+            GROUP BY r.id ORDER BY r.name, r.version
+            """
+        )
+        return [dict(row) for row in rows]
+
+    def summary(self) -> dict[str, Any]:
+        """Aggregates for the whole database, computed in SQL rather than in Python.
+
+        At the scale the design cites — thousands of keys times dozens of indicators —
+        materializing every row to count it is not an option.
+        """
+        conn = self._connect()
+        totals = conn.execute(
+            """
+            SELECT COUNT(*) AS artifacts,
+                   COALESCE(SUM(n_bytes), 0) AS n_bytes,
+                   COALESCE(SUM(valid = 0), 0) AS invalid,
+                   COALESCE(SUM(compute_ms), 0) AS compute_ms,
+                   MIN(computed_at) AS oldest,
+                   MAX(computed_at) AS newest,
+                   MAX(n_bytes) AS largest
+            FROM artifact
+            """
+        ).fetchone()
+        return {
+            "path": self.path,
+            "schema_version": self.meta("schema_version"),
+            "fingerprint_spec_version": self.meta("fingerprint_spec_version"),
+            "artifacts": int(totals["artifacts"]),
+            "invalid": int(totals["invalid"]),
+            "n_bytes": int(totals["n_bytes"]),
+            "largest_artifact_bytes": None if totals["largest"] is None else int(totals["largest"]),
+            "compute_ms": int(totals["compute_ms"]),
+            "oldest_computed_at": None if totals["oldest"] is None else int(totals["oldest"]),
+            "newest_computed_at": None if totals["newest"] is None else int(totals["newest"]),
+            "recipes": len({row["name"] for row in self.recipe_rows()}),
+            "recipe_versions": len(self.recipe_rows()),
+            "dep_edges": int(conn.execute("SELECT COUNT(*) FROM dep").fetchone()[0]),
+            "pending_tasks": int(conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]),
+        }
+
+    def iter_payloads(
+        self, recipe: str | None = None, batch: int = 200
+    ) -> Iterator[tuple[int, str, bytes]]:
+        """Yield `(artifact_id, digest, payload)` in batches.
+
+        Batched rather than one query, because verifying a large cache must not hold
+        every payload in memory at once.
+        """
+        conn = self._connect()
+        sql = "SELECT a.id, a.digest, a.data FROM artifact a JOIN recipe r ON r.id = a.recipe_id"
+        params: list[Any] = []
+        if recipe is not None:
+            sql += " WHERE r.name = ?"
+            params.append(recipe)
+        sql += " ORDER BY a.id LIMIT ? OFFSET ?"
+
+        offset = 0
+        while True:
+            rows = conn.execute(sql, (*params, batch, offset)).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield int(row["id"]), str(row["digest"]), bytes(row["data"])
+            offset += len(rows)
 
     def recipe_source_hash(self, recipe: str, version: int) -> str | None:
         """The advisory source hash last recorded for a recipe version, if any."""
@@ -734,3 +931,62 @@ def _ref_from_row(row: sqlite3.Row) -> ArtifactRef:
         refreshed_at=int(row["refreshed_at"]),
         compute_ms=None if row["compute_ms"] is None else int(row["compute_ms"]),
     )
+
+
+def inspect_database(path: str | PathLike[str]) -> dict[str, Any]:
+    """Describe a matview database without opening it as a store.
+
+    Deliberately version-blind: it reads only `meta`, the SQLite catalogue and row
+    counts, none of which depend on the schema version. That is what lets it work on a
+    file this build would otherwise refuse — which is exactly the moment someone reaches
+    for a diagnostic tool. It reports what the file is and what wrote it; it does not
+    pretend to read rows whose columns it does not know. See DECISIONS.md D36.
+
+    Opens read-only, so it can never create or migrate the file it is inspecting.
+    """
+    target = Path(path)
+    if not target.exists():
+        raise StoreError(f"{target} does not exist")
+
+    uri = f"file:{urllib.parse.quote(str(target))}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = sorted(
+            str(row["name"])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        )
+        meta: dict[str, str] = {}
+        if "meta" in tables:
+            meta = {str(row["k"]): str(row["v"]) for row in conn.execute("SELECT k, v FROM meta")}
+
+        counts: dict[str, int] = {}
+        columns: dict[str, list[str]] = {}
+        for table in tables:
+            # Table names come from the catalogue, not from user input.
+            counts[table] = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            columns[table] = [
+                str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")
+            ]
+
+        recorded_schema = meta.get("schema_version")
+        recorded_spec = meta.get("fingerprint_spec_version")
+        return {
+            "path": str(target),
+            "n_bytes": target.stat().st_size,
+            "schema_version": recorded_schema,
+            "fingerprint_spec_version": recorded_spec,
+            "implemented_schema_version": SCHEMA_VERSION,
+            "implemented_fingerprint_spec_version": FINGERPRINT_SPEC_VERSION,
+            "readable": recorded_schema == str(SCHEMA_VERSION)
+            and recorded_spec == str(FINGERPRINT_SPEC_VERSION),
+            "journal_mode": str(conn.execute("PRAGMA journal_mode").fetchone()[0]),
+            "tables": tables,
+            "columns": columns,
+            "row_counts": counts,
+            "meta": meta,
+        }
+    finally:
+        conn.close()

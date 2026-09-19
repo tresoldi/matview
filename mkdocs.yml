@@ -47,6 +47,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Guide: guide.md
+  - Command line: cli.md
   - API reference: reference.md
   - Design spec: design-spec.md
 

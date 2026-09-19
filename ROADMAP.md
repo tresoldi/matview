@@ -84,7 +84,7 @@ rows. There are no measurements at all. `gc()` re-queries in a loop until it rea
 fixed point, and `dependents_of` builds an `IN` clause sized by its input. Both are fine
 at test scale and neither has been looked at under load.
 
-### A CLI
+### A CLI — done
 
 `matview ls`, `plan`, `show`, `gc`, `drop`, `stats`. A cache that cannot be inspected
 from a terminal is hard to trust. argos already uses typer, so there is a house pattern

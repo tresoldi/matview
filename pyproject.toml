@@ -28,6 +28,9 @@ classifiers = [
 # must not be hand-rolled. See DECISIONS.md D3.
 dependencies = ["rfc8785>=0.1.4"]
 
+[project.scripts]
+matview = "matview.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/tresoldi/matview"
 Source = "https://github.com/tresoldi/matview"

@@ -459,3 +459,54 @@ It exists because the counters cannot otherwise answer the question a TTL raises
 rebuild caused by a changed input and a rebuild caused by a clock cost the same and mean
 entirely different things, and without this counter a graph with short `max_age` values
 is indistinguishable from one with an invalidation bug.
+
+## D36 — `matview info` is version-blind, and nothing else is
+
+`SqliteStore` refuses to open a database whose `schema_version` or
+`fingerprint_spec_version` it does not implement, which is right: the columns may not be
+the ones it selects, and the hashes may not be the ones it computes. But a diagnostic
+tool is wanted precisely when something is already wrong, and "it refuses to tell you
+anything" sends the reader back to `sqlite3` on the command line — which is what the CLI
+exists to replace.
+
+`inspect_database()` therefore reads only what does not depend on the schema version:
+the `meta` table, the SQLite catalogue, the column lists and the row counts. It reports
+what the file is, what wrote it, and why the other commands refuse. It does not degrade
+the real queries to work against older columns, because that would mean a second,
+version-tolerant read path that nothing else exercises and that would rot silently.
+
+It opens with `mode=ro`, so it can never create or migrate the file it is describing.
+
+## D37 — Decoding a stored value does not need the application's recipes
+
+The obvious division for the CLI is "metadata needs nothing, values need `--recipes`",
+and it is very nearly right — but a value's codec is recorded on its `recipe` row, not
+looked up in the registry. `cat --id 12` can therefore decode without importing anything.
+
+What genuinely needs the registry is narrower than it looks:
+
+- **A key given as parameters**, because declared defaults are filled in *before* the key
+  is hashed. `show sma symbol=AAPL` cannot know that `interval` defaults to `"1d"`, so
+  the hash will not match. A *complete* key needs nothing.
+- **`plan`**, because a plan resolves recipes.
+- **A codec the application registered itself**, which no amount of reading the database
+  can conjure. `cat` says so by name and suggests `--recipes` or `--raw`.
+
+Being accurate about this matters: every `--recipes` a tool demands unnecessarily is a
+case where inspection fails because an application's imports have side effects, or its
+dependencies are not installed on the machine doing the diagnosing.
+
+## D38 — `SqliteStore(read_only=True)`, and the CLI always uses it
+
+A plain `SqliteStore(path)` creates the database if it is absent. For a library that is
+correct. For an inspection tool it is a bug with two faces, and both were observed
+before this existed: `matview ls --db typo.db` created an empty database and reported it
+as containing nothing, and opening someone's cache switched its journal mode to WAL while
+they were in the middle of diagnosing it.
+
+`read_only=True` requires the file to exist, connects through SQLite's `mode=ro`, creates
+no schema, seeds no `meta`, and skips the journal-mode switch — while still enforcing the
+version checks. Write methods raise rather than surfacing a raw SQLite error.
+
+It is on the store rather than in the CLI because the guarantee belongs to whatever holds
+the connection, and because a replication or audit tool would want exactly the same thing.

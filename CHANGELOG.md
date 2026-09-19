@@ -77,6 +77,10 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Fixed
 
+- Maintenance operations over large artifact sets no longer exceed SQLite's bound-variable
+  limit, and cache verification now uses keyed rather than `OFFSET` pagination. SQLite
+  JSON1 (included by default in SQLite 3.38+) is required and checked when opening a store.
+
 - The codec-floor job silently verified a stale build of matview: `uv run --no-project
   --with .` reinstalls a cached wheel. It refreshes the build now, and a test asserts the
   installed codec set matches the checked-in fixture, because the symptom was invisible —

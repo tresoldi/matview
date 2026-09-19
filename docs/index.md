@@ -45,6 +45,11 @@ pip install 'matview[npy]'       # numpy arrays
 pip install 'matview[all]'
 ```
 
+matview requires SQLite with JSON1. SQLite 3.38 or newer includes JSON1 by default;
+an older or minimal SQLite build must provide JSON1 itself. `SqliteStore` checks this on
+every open, including read-only opens, and refuses the database with its linked SQLite
+version when the capability is absent.
+
 ## Where to go next
 
 - **[Guide](guide.md)** — recipes, keys, policy, partitions and foreign recipes.

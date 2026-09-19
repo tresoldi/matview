@@ -233,6 +233,8 @@ declared.
 | `arrow` | polars `DataFrame` or `Series` | polars `DataFrame` |
 | `arrow-series` | polars `DataFrame` or `Series` | polars `Series` |
 | `arrow-pandas` | pandas `DataFrame` or `Series` | pandas `DataFrame` |
+| `arrow-year` | polars, sliced by calendar year | polars `DataFrame` |
+| `arrow-year-pandas` | pandas, sliced by calendar year | pandas `DataFrame` |
 | `npy` | numpy `ndarray` | `ndarray` |
 
 Because fingerprints key on content digests, **a codec must produce identical bytes for
@@ -290,6 +292,46 @@ A recipe that reads one part depends on **that part alone**, so a write to the c
 year does not invalidate anything built from a closed one. Every part of a value is
 written in one transaction, and a part a recomputation no longer produces is removed —
 otherwise it would be merged into every later whole-value read forever.
+
+### Calendar years
+
+`arrow-year` slices a frame by the calendar year of a column named `date`:
+
+```python
+@recipe(version=1, codec="arrow-year", index=("symbol",))
+def ohlcv(ctx, *, symbol: str):
+    return vendor.bars(symbol)          # -> parts "2023", "2024", "2025", ...
+```
+
+The point is write amplification. A whole-series encoding means a daily append rewrites
+the entire series; with yearly parts it rewrites one year, and the closed years are not
+even touched — their digests and `computed_at` are unchanged, so nothing built on them is
+invalidated. That is the whole argument for partitioning, and the test suite asserts it
+rather than taking it on trust.
+
+For any other column name, register your own instance:
+
+```python
+from matview.codecs import register_codec
+from matview.codecs._arrow import ArrowYearCodec
+
+register_codec(ArrowYearCodec(name="bars-year", column="day"))
+```
+
+Three details worth knowing:
+
+- **Rows are sorted by the partitioning column** before slicing, so a frame that is merely
+  reordered encodes identically rather than churning every fingerprint above it. Arrow's
+  sort is stable, so rows sharing a date keep their input order — canonical for one row
+  per date, and no stronger claim than that.
+- **Timezone-aware timestamps are read in UTC.** The same instant is 2023 in UTC and 2024
+  in Asia/Tokyo, and a row near a year boundary must not change part because of a column's
+  timezone metadata. A `Date` column is unambiguous.
+- **Nulls are refused.** A null date belongs to no year, and bucketing it anywhere would
+  lose rows on the next read.
+
+An empty frame has no years, so it stores as one unpartitioned artifact rather than zero
+parts: an empty series is a value, not a miss.
 
 ## Foreign recipes
 

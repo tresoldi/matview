@@ -230,6 +230,18 @@ def _sample_for(codec_name: str) -> object:
     if codec_name == "npy":
         np = pytest.importorskip("numpy")
         return np.arange(12, dtype="int64").reshape(3, 4)
+    if codec_name in PARTITIONING:
+        import datetime as dt
+
+        columns = {
+            "date": [dt.date(2024, 1, 1), dt.date(2024, 6, 1), dt.date(2025, 1, 1)],
+            "close": [1.0, 2.5, 3.0],
+        }
+        if codec_name.endswith("pandas"):
+            pd = pytest.importorskip("pandas")
+            return pd.DataFrame(columns)
+        pl = pytest.importorskip("polars")
+        return pl.DataFrame(columns)
     if codec_name == "arrow-pandas":
         pd = pytest.importorskip("pandas")
         return pd.DataFrame({"close": [1.0, 2.5, 3.0], "volume": [10, 20, 30]})
@@ -238,6 +250,10 @@ def _sample_for(codec_name: str) -> object:
         frame = pl.DataFrame({"close": [1.0, 2.5, 3.0], "volume": [10, 20, 30]})
         return frame["close"] if codec_name == "arrow-series" else frame
     raise AssertionError(f"no sample defined for codec {codec_name!r}")
+
+
+#: Codecs whose encode returns a dict of parts. Determinism is asserted per part.
+PARTITIONING = {"arrow-year", "arrow-year-pandas"}
 
 
 @pytest.mark.parametrize("codec_name", sorted(CODEC_NAMES))
@@ -249,12 +265,16 @@ def test_rule07_codec_byte_determinism(codec_name: str) -> None:
 
     value = _sample_for(codec_name)
     once = codec.encode(value)
-    assert isinstance(once, bytes), "sample values are deliberately unpartitioned"
 
     # Identical input, identical bytes, every time.
     assert codec.encode(value) == once
     # And a round trip is a fixed point, not merely lossless.
-    assert codec.encode(codec.decode(once)) == once
+    if codec_name in PARTITIONING:
+        assert isinstance(once, dict)
+        assert codec.encode(codec.decode_parts(once)) == once
+    else:
+        assert isinstance(once, bytes)
+        assert codec.encode(codec.decode(once)) == once
 
 
 # ---------------------------------------------------------------------------

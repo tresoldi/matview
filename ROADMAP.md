@@ -69,13 +69,13 @@ roots in one walk can.
 This is the highest value per line on the list, because it makes an existing promise
 true rather than adding a new one.
 
-### A calendar-year partitioned codec
+### A calendar-year partitioned codec — done
 
-The spec describes it concretely — yearly parts, the write-amplification arithmetic,
-closed years immutable — and says plainly that none of it belongs in the core. It is
-therefore the natural first thing built *on top* of the core. `store_parts`,
-`decode_parts` and part-level dep edges are implemented and tested; only a test fixture
-exercises them today.
+Built as `arrow-year` and `arrow-year-pandas`. Shipped in matview rather than as an
+example, with the reasoning in D42: the spec's "none of this belongs in the core" is about
+the core, and the same spec puts partitioning in the codec layer, where the domain-neutral
+core cannot see it. The write-amplification argument is asserted by tests at both the codec
+and the storage level rather than taken on trust.
 
 ### Benchmarks at the spec's own scale
 

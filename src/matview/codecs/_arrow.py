@@ -27,9 +27,10 @@ import polars as pl
 
 from matview.codecs import BaseCodec, register_codec
 from matview.codecs._arrow_ipc import canonical_table, encode_table, read_table
+from matview.codecs._arrow_parts import combine_years, slice_by_year
 from matview.errors import CodecError
 
-__all__ = ["ArrowCodec", "ArrowSeriesCodec"]
+__all__ = ["ArrowCodec", "ArrowSeriesCodec", "ArrowYearCodec"]
 
 
 def _to_table(value: object) -> Any:
@@ -69,5 +70,35 @@ class ArrowSeriesCodec(ArrowCodec):
         return frame.to_series()
 
 
+class ArrowYearCodec(ArrowCodec):
+    """`arrow` bytes, split into one artifact per calendar year.
+
+    Registered as `arrow-year`, partitioning on a column named `date`. For any other
+    column name, register your own instance:
+
+        register_codec(ArrowYearCodec(name="bars-year", column="day"))
+
+    An **empty** frame has no years, so it stores as a single unpartitioned artifact
+    rather than as zero parts. An empty series is a value, not a miss (rule 9), and zero
+    parts would store nothing at all. See DECISIONS.md D43.
+    """
+
+    def __init__(self, name: str = "arrow-year", column: str = "date") -> None:
+        self.name = name
+        self.column = column
+
+    def encode(self, value: object) -> bytes | dict[str, bytes]:
+        table = _to_table(value)
+        if table.num_rows == 0:
+            return encode_table(table)
+        return {
+            label: encode_table(part) for label, part in slice_by_year(table, self.column).items()
+        }
+
+    def decode_parts(self, parts: dict[str, bytes]) -> object:
+        return pl.from_arrow(combine_years({label: read_table(d) for label, d in parts.items()}))
+
+
 register_codec(ArrowCodec())
 register_codec(ArrowSeriesCodec())
+register_codec(ArrowYearCodec())

@@ -12,6 +12,7 @@ reach it by accident from six levels up, and ingesting is an explicit act.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from pathlib import Path
 
@@ -22,20 +23,29 @@ from matview import Cache, MissingArtifacts, SqliteStore, recipe
 DB = Path(__file__).with_name("finance.db")
 
 #: Stands in for a vendor API. Editing a value here and re-running is the interesting part.
+#: Long enough to span several calendar years, which is what the year codec partitions on.
+DAYS = 1_000
+START = dt.date(2023, 1, 2)
 CLOSES: dict[str, list[float]] = {
-    "AAPL": [100 + 10 * math.sin(i / 7) + i * 0.4 for i in range(400)],
-    "MSFT": [200 + 8 * math.cos(i / 5) + i * 0.3 for i in range(400)],
+    "AAPL": [100 + 10 * math.sin(i / 7) + i * 0.4 for i in range(DAYS)],
+    "MSFT": [200 + 8 * math.cos(i / 5) + i * 0.3 for i in range(DAYS)],
 }
 
 
-@recipe(version=1, codec="arrow", index=("symbol",), on_miss="raise", deterministic=False)
+@recipe(version=1, codec="arrow-year", index=("symbol",), on_miss="raise", deterministic=False)
 def ohlcv(ctx, *, symbol: str, interval: str = "1d", adjust: str = "split"):
-    """A protected root. A network fetch is non-deterministic and usually costs money."""
+    """A protected root, stored one artifact per calendar year.
+
+    A network fetch is non-deterministic and usually costs money, hence
+    `deterministic=False` and `on_miss="raise"`. The year codec is the spec's financial
+    case: a whole-series encoding means a daily append rewrites the entire series, while
+    yearly parts rewrite only the current year and leave the closed ones untouched.
+    """
     print(f"  [fetch] ohlcv {symbol} {interval} {adjust}")
     closes = CLOSES[symbol]
     return pl.DataFrame(
         {
-            "day": list(range(len(closes))),
+            "date": [START + dt.timedelta(days=i) for i in range(len(closes))],
             "close": closes,
             "volume": [1_000 + i for i in range(len(closes))],
         }
@@ -106,6 +116,28 @@ def main() -> None:
 
     print("\nEverything is current again:")
     print("  " + cache.plan("sharpe", symbol="AAPL").describe().replace("\n", "\n  "))
+
+    print("\nThe bars are stored one artifact per calendar year:")
+    for ref in cache.query(recipe="ohlcv"):
+        print(f"  {ref.part}  {ref.n_bytes:>6} bytes  digest {ref.digest[:12]}…")
+
+    print("\nAppending one day rewrites the current year and nothing else. The closed")
+    print("years are not even written: identical digest and identical computed_at, so")
+    print("nothing built on a closed year is invalidated either.")
+    before = {r.part: (r.digest, r.computed_at) for r in cache.query(recipe="ohlcv")}
+    CLOSES["AAPL"].append(CLOSES["AAPL"][-1] * 1.01)
+    cache.get("ohlcv", symbol="AAPL", force=True)
+    for ref in cache.query(recipe="ohlcv"):
+        was = before.get(ref.part)
+        state = (
+            "new"
+            if was is None
+            else ("rewritten" if was != (ref.digest, ref.computed_at) else "untouched")
+        )
+        print(f"  {ref.part}  {state}")
+    print("\n  (that new bar *is* inside the reported window, so the indicators above are")
+    print("   stale now and would rebuild on the next read — which is the point: the")
+    print("   cascade follows the one part that actually changed)")
 
     print("\nWhat is stored:")
     for ref in cache.query():

@@ -8,6 +8,10 @@ matview show   --db cache.db --id 12
 matview verify --db cache.db      # every payload against its recorded digest
 matview cat    --db cache.db --id 12
 matview plan   --db cache.db --recipes myapp.recipes sharpe symbol=AAPL
+
+matview lineage --db cache.db --id 12     # what produced this?
+matview impact  --db cache.db --changed 12  # what breaks if this changes?
+matview cost    --db cache.db --by-recipe   # where the compute time goes
 ```
 
 `--db` defaults to `$MATVIEW_DB`. Every command takes `--json`.
@@ -30,6 +34,11 @@ repeatable):
   will not match. Passing every field works without `--recipes`; a partial key needs it.
   When this is the cause, the error says so rather than reporting the artifact absent.
 - **`plan`**, which resolves recipes in order to walk the graph.
+
+`lineage`, `impact` and `cost` do not need it either: they read the dependency graph the
+cache recorded as it ran, so nothing has to be imported to walk it. They have their own
+page, [Graph queries](graph.md), because `impact --bump` needs more explaining than a
+table row allows.
 
 Decoding a value does **not** need it. The codec is recorded on the recipe row, so
 `cat --id 12` decodes without importing anything — unless the codec is one your
@@ -114,6 +123,18 @@ The `plan()` walk, rendered. Reports absent, stale and expired separately, lists
 declared `deterministic=False`, and gives each absent node the chain of recipes that
 wanted it. Needs `--recipes`.
 
+## lineage, impact, cost
+
+Three questions about the recorded dependency graph, each with an indented-tree, JSON,
+Graphviz DOT and Mermaid rendering. They have their own page: [Graph queries](graph.md).
+
+```bash
+matview lineage --db cache.db --id 12 --format dot | dot -Tsvg -o lineage.svg
+matview impact  --db cache.db --bump ohlcv
+matview cost    --db cache.db --id 12 --critical-path
+```
+
 ## Not here yet
 
 `drop` and `gc` mutate, and are deliberately absent. They exist on `Cache`.
+`matview impact --drop` shows what a drop would do, which is the useful half.

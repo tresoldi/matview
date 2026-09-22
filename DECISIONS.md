@@ -681,3 +681,99 @@ measuring different database states.
 Each result still records median and p95 together with its sample count. For a
 one-sample operation they are the same value, which is more honest than presenting a
 fabricated percentile or silently treating a mutation as repeatable.
+
+## D49 — Graph queries live in `matview.graph`, not on the store
+
+Lineage, impact and cost are assembled and rendered in a `matview/graph.py` module that
+takes a store. `SqliteStore` gains only the SQL it needs — the upward walk, batched edge
+reads, an id-set-to-recipe-count rollup and a per-recipe cost aggregate.
+
+Three placements were considered. Putting everything on `SqliteStore` puts Graphviz and
+Mermaid rendering on the persistence seam, which is the wrong thing for a seam whose
+entire purpose is to make an HTTP backend possible later. Putting the entry points on
+`Cache` requires a registry that none of these queries use, and forces a read-only
+inspection tool to construct one. The module wins on both counts, and library users
+reach it as `matview.graph.lineage(cache.store, artifact_id)`.
+
+The read surface the queries need is declared as a `GraphStore` protocol *in that
+module* rather than added to `Store`. `SqliteStore` satisfies both structurally. A
+remote backend must be able to hold artifacts without also implementing a lineage walk.
+
+## D50 — Nothing from this work goes on the `Store` protocol
+
+`Store` is what the *core* calls. `deps_of_many`, `inputs_of`, `refs_by_ids`,
+`ids_of_recipe`, `counts_by_recipe` and `recipe_cost_rows` are all read methods on
+`SqliteStore` that only `matview.graph` and the CLI use, so none of them is a protocol
+member. `deps_of_many` was briefly put there on the assumption the scheduler would call
+it; D52 records why it does not, and it came back off.
+
+Every requested id is a key of `deps_of_many`'s result, so a root maps to an empty list
+rather than being absent and the caller never has to decide what a missing key means.
+
+It carries a single-id fast path: `json_each` is measurably more expensive than an
+equality test, and one id is the overwhelmingly common call, because `deps_of` delegates
+to it. Delegating rather than keeping two queries means the batched and single reads
+cannot drift apart; a test asserts they agree.
+
+## D51 — Cost is summed per value, never per artifact row
+
+`compute_ms` is recorded once per artifact, and `Cache._persist` writes the same figure
+on every part of a partitioned value, because the compute happened once. Any aggregate
+over artifact rows therefore multiplies such a value by its part count. Measured on a
+three-year `arrow-year` value, `SUM(compute_ms)` reports 117 ms for 39 ms of work.
+
+Every cost aggregate in this work groups on `(recipe, version, key_hash)` and takes
+`MAX(compute_ms)` within the group. `SqliteStore.summary()` had the bug and is fixed in
+the same pass; it now also reports a `values` count beside `artifacts`.
+
+The reports print the value count next to the total on purpose, so that the
+deduplication is visible to a reader rather than something they have to trust. This
+failure mode produces no error and no symptom other than a wrong number, which is
+exactly why it is stated three times — here, in the code, and in the output.
+
+## D52 — The `plan_many` N+1 is in the walk, not in the loop the plan named
+
+The handoff plan for this work identified `deps_of(row.id)` in `Cache._verify` and
+`Cache._walk_stored_deps` as an N+1 and expected switching both to `deps_of_many` to be
+a free speedup. It is not, and the premise is wrong: `rows` there is the *parts of one
+node*, so the loop is a single iteration for every unpartitioned value and there is
+nothing to batch across.
+
+Measured on the 250k profile, five samples per run: `plan_many` at 274–275 roots/s
+before the change, 235 roots/s with a naive `deps_of_many`, and 259–269 roots/s with the
+single-id fast path of D50. The change is a regression at every size, so the two call
+sites keep `deps_of` and carry a comment saying why the obvious-looking batching is not
+a cleanup. With the core no longer calling it, `deps_of_many` also came back off the
+`Store` protocol; see D50.
+
+`plan_many` *is* genuinely slow against `get_many`, and its N+1 is real — it is across
+the depth-first descent, one `deps_of` and one `fetch_all_parts` per node visited. A
+node's edges have to be read before its children can be resolved, so removing it means
+restructuring the suspending walk to proceed level by level, which is a scheduler change
+rather than a store call swap. Left undone deliberately, and recorded here so the next
+reader does not re-derive the wrong fix from the same symptom.
+
+## D53 — Impact defaults to counts, and enumeration is opt-in
+
+`impact` prints a per-recipe summary by default, with `--all` to enumerate, `--limit` to
+bound the listing and `--depth` to bound the walk. In the recorded 250k profile one
+shared root reaches 255,000 dependents; printing them helps nobody and rendering them to
+Graphviz helps less. `--format dot` and `--format mermaid` therefore refuse without
+`--all` and say so.
+
+The counting is done in SQL (`counts_by_recipe`), so the default answer never
+materializes 255,000 `ArtifactRef` objects to throw away. It takes 0.87 s on that
+profile.
+
+## D54 — An `ArtifactGraph` carries the direction it was walked in
+
+`edges` is always `(dependent, dependency)` regardless of which way the walk ran, because
+that is what the `dep` table records and storing it reversed would make the two walks
+disagree about what an edge means. A renderer therefore cannot tell from the edges alone
+which end to descend from, so the graph carries a `direction` of `"inputs"` or
+`"dependents"`.
+
+This is what lets one value type and one set of four renderers serve both lineage and an
+enumerated impact set. The DOT and Mermaid renderings point their arrows the way data
+flows — dependency to dependent — in both directions, because that is the reading a
+provenance graph gets from anyone looking at one.

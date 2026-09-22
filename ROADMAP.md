@@ -123,19 +123,27 @@ true, and it is now pinned by golden fixtures and checked at the version floor.
 
 ---
 
-### Lineage, impact and cost — planned, see [plans/graph-queries.md](plans/graph-queries.md)
+### Lineage, impact and cost — built, see [plans/graph-queries.md](plans/graph-queries.md)
 
-matview records a complete observed DAG and offers almost no way to interrogate it:
-`deps_of` returns one level, `dependents_of` walks downward only and returns bare ids, and
-there is no upward walk at all — so "which raw inputs produced this number?" cannot be
-asked. `compute_ms` is recorded on every artifact and never aggregated along the graph it
-was recorded against.
+matview recorded a complete observed DAG and offered almost no way to interrogate it:
+`deps_of` returned one level, `dependents_of` walked downward only and returned bare ids,
+and there was no upward walk at all — so "which raw inputs produced this number?" could
+not be asked. `compute_ms` was recorded on every artifact and never aggregated along the
+graph it was recorded against.
 
-Planned as three features over one shared foundation: lineage (the input closure), impact
-(what a digest change, a version bump or a drop would do), and cost (embodied compute, a
-per-recipe rollup, and the critical path). The plan also records a verified trap —
+Built as three features over one shared foundation in `matview.graph`: lineage (the input
+closure), impact (what a digest change, a version bump or a drop would do), and cost
+(embodied compute, a per-recipe rollup, and the critical path), each rendering to an
+indented tree, JSON, Graphviz DOT or Mermaid. The plan's verified trap held —
 `compute_ms` is carried whole on every part of a partitioned value, so summing over
-artifact rows overcounts, which `summary()` does today.
+artifact rows overcounts, which `summary()` did — and every cost aggregate now
+deduplicates by `(recipe, version, key_hash)`.
+
+One thing the plan expected did not survive measurement. Folding `deps_of_many` into
+`Cache._verify` and `_walk_stored_deps` was to be a free `plan_many` speedup; it is a
+regression, because the loop it batches is over the parts of one node rather than over
+nodes. The real N+1 is across the depth-first descent and removing it is a scheduler
+change, recorded in D52 and left undone.
 
 ## Tier 3 — architecture
 

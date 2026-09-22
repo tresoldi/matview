@@ -10,6 +10,13 @@ edges and the invalidation cascade must land in one transaction, and if the call
 two calls an HTTP-backed store could never make that atomic. Putting the transaction
 boundary inside the interface is precisely what keeps a remote implementation possible.
 
+**What is not here is as deliberate as what is.** The graph queries in `matview.graph`
+— lineage, impact, cost, and the batched and upward walks they run on — declare their own
+`GraphStore` protocol in that module. They are questions about the recorded DAG, and a
+backend that holds artifacts should not have to implement a lineage walk to be a store.
+This protocol is what the *core* calls; nothing else belongs on it. See DECISIONS.md
+D49 and D50.
+
 **Fingerprinting is client-side, always.** The store is handed finished digests and
 fingerprints; it never computes them. If a local SQLite store and a future HTTP store
 could disagree about a hash, cross-backend lookups would miss silently and look like a

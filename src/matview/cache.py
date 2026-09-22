@@ -600,6 +600,8 @@ class Cache:
         all of its protected misses in one pass rather than one per attempt.
         """
         current = True
+        # `deps_of`, not `deps_of_many`: `rows` is the parts of ONE node, so there is
+        # nothing here to batch. See the note in `_walk_stored_deps`.
         for row in rows:
             edges: list[DepEdge] = []
             blocked = False
@@ -647,6 +649,13 @@ class Cache:
 
     def _walk_stored_deps(self, walk: _Walk, rows: Sequence[Artifact], policy: Policy) -> None:
         """Plan mode: follow what a node read last time, to report the whole subgraph."""
+        # One `deps_of` per node, and measurably the right call despite appearances.
+        # `rows` is the parts of a single node, so batching across it saves nothing: the
+        # loop is one iteration for every unpartitioned value. `plan_many` *is* slow
+        # against `get_many`, and its N+1 is across the depth-first descent, not across
+        # this loop — each node's edges must be read before its children can be
+        # resolved, so removing it means restructuring the walk level by level rather
+        # than swapping a store call. Measured both ways; see DECISIONS.md D52.
         for row in rows:
             for edge in self.store.deps_of(row.id or 0):
                 try:

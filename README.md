@@ -106,11 +106,22 @@ matview stats  --db cache.db
 matview ls     --db cache.db --recipe sma --invalid
 matview show   --db cache.db --id 12
 matview verify --db cache.db      # every payload against its recorded digest
+
+matview lineage --db cache.db --id 12       # what produced this?
+matview impact  --db cache.db --changed 12  # what breaks if this changes?
+matview cost    --db cache.db --by-recipe   # where the compute time goes
 ```
 
 Read-only, `--json` on everything, and no dependencies beyond the core. Metadata needs
 nothing imported; only a key given as partial parameters and `plan` need
 `--recipes MODULE`. See the [command line guide](https://tresoldi.github.io/matview/cli/).
+
+The last three walk the dependency graph the cache recorded as it ran — the input closure
+of a value, what a change or a version bump or a drop would reach, and what a number cost
+to compute — and render it as an indented tree, JSON, Graphviz DOT or Mermaid. See
+[graph queries](https://tresoldi.github.io/matview/graph/); `impact --bump` in particular
+is the clearest explanation of why a dependency's recipe version is deliberately not in a
+dependent's fingerprint.
 
 ## Examples
 

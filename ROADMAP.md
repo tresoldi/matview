@@ -77,7 +77,7 @@ the core, and the same spec puts partitioning in the codec layer, where the doma
 core cannot see it. The write-amplification argument is asserted by tests at both the codec
 and the storage level rather than taken on trust.
 
-### Benchmarks at the spec's own scale — planned, see [plans/250k-scale.md](plans/250k-scale.md)
+### Benchmarks at the spec's own scale — done, see [docs/performance.md](docs/performance.md)
 
 The design cites roughly 5,000 symbols and 50 indicators, which is 250,000 artifact
 rows. There are no measurements at all.
@@ -85,10 +85,13 @@ rows. There are no measurements at all.
 Investigating it found a defect rather than just slowness: seven `IN` clauses build one
 SQL placeholder per artifact id, and SQLite's compiled limit is 32,766 on builds since
 3.32 and 999 before that — so `drop()` over tens of thousands of artifacts is a hard
-failure on a plausible interpreter, not a slow one. `iter_payloads` also paginates with
-`OFFSET`, making `matview verify` quadratic. The plan, the measurements behind it, the
-settled decisions and the one question still open are written up in
-[plans/250k-scale.md](plans/250k-scale.md).
+failure on a plausible interpreter, not a slow one. `iter_payloads` also paginated with
+`OFFSET`, making `matview verify` quadratic. Both are fixed; the recorded baseline is in
+[docs/performance.md](docs/performance.md) and the harness in `benchmarks/`. The plan that
+drove the work is kept at [plans/250k-scale.md](plans/250k-scale.md).
+
+What the baseline leaves open: `plan_many` runs at 291 roots/s against `get_many`'s
+24,880, because the scheduler asks the store for one node's dependencies at a time.
 
 ### A CLI — done
 
@@ -119,6 +122,20 @@ data hashed differently under polars and pandas 2.2. Normalizing it (D39) made t
 true, and it is now pinned by golden fixtures and checked at the version floor.
 
 ---
+
+### Lineage, impact and cost — planned, see [plans/graph-queries.md](plans/graph-queries.md)
+
+matview records a complete observed DAG and offers almost no way to interrogate it:
+`deps_of` returns one level, `dependents_of` walks downward only and returns bare ids, and
+there is no upward walk at all — so "which raw inputs produced this number?" cannot be
+asked. `compute_ms` is recorded on every artifact and never aggregated along the graph it
+was recorded against.
+
+Planned as three features over one shared foundation: lineage (the input closure), impact
+(what a digest change, a version bump or a drop would do), and cost (embodied compute, a
+per-recipe rollup, and the critical path). The plan also records a verified trap —
+`compute_ms` is carried whole on every part of a partitioned value, so summing over
+artifact rows overcounts, which `summary()` does today.
 
 ## Tier 3 — architecture
 

@@ -442,3 +442,222 @@ def test_an_unimportable_recipes_module_is_reported(
 
     assert run("plan", "--db", str(db), "--recipes", "/tmp/nowhere.py", "sma")[0] == 1
     assert "no such file" in capsys.readouterr().err
+
+
+# --- lineage ---------------------------------------------------------------
+
+
+def _sma_id(db: Path, symbol: str = "AAPL") -> int:
+    store = SqliteStore(db, read_only=True)
+    try:
+        (ref,) = [r for r in store.list_refs("sma") if symbol in r.key_json]
+        return ref.id
+    finally:
+        store.close()
+
+
+def test_lineage_shows_what_an_artifact_was_built_from(db: Path) -> None:
+    code, text = run("lineage", "--db", str(db), "--id", str(_sma_id(db)))
+    assert code == 0
+    assert "sma v3" in text
+    assert "ohlcv v1" in text
+    assert "└─" in text
+
+
+def test_lineage_needs_no_recipes_module(db: Path) -> None:
+    """The metadata division from D37: the DAG is in the file, so nothing is imported."""
+    assert REGISTRY.names() == []
+    assert run("lineage", "--db", str(db), "--id", str(_sma_id(db)))[0] == 0
+
+
+def test_lineage_addresses_an_artifact_the_way_show_does(db: Path, recipes_file: Path) -> None:
+    by_id, _ = run("lineage", "--db", str(db), "--id", str(_sma_id(db)), "--format", "json")
+    by_key, _ = run(
+        "lineage",
+        "--db",
+        str(db),
+        "--recipes",
+        str(recipes_file),
+        "sma",
+        "symbol=AAPL",
+        "--format",
+        "json",
+    )
+    assert by_id == by_key == 0
+
+
+@pytest.mark.parametrize("fmt", ["tree", "json", "dot", "mermaid"])
+def test_lineage_renders_every_format(db: Path, fmt: str) -> None:
+    code, text = run("lineage", "--db", str(db), "--id", str(_sma_id(db)), "--format", fmt)
+    assert code == 0
+    assert text.strip()
+
+
+def test_lineage_json_is_the_same_whichever_flag_asks_for_it(db: Path) -> None:
+    artifact_id = str(_sma_id(db))
+    assert (
+        run("lineage", "--db", str(db), "--id", artifact_id, "--format", "json")[1]
+        == run("lineage", "--db", str(db), "--id", artifact_id, "--json")[1]
+    )
+
+
+def test_lineage_depth_bounds_the_walk(db: Path) -> None:
+    payload = run_json(
+        "lineage", "--db", str(db), "--id", str(_sma_id(db)), "--depth", "0", "--json"
+    )
+    assert len(payload["nodes"]) == 1
+
+
+def test_lineage_of_an_unknown_id_says_so(db: Path, capsys: pytest.CaptureFixture) -> None:
+    assert run("lineage", "--db", str(db), "--id", "999")[0] == 1
+    assert "no artifact with id 999" in capsys.readouterr().err
+
+
+# --- impact ----------------------------------------------------------------
+
+
+def _ohlcv_id(db: Path, symbol: str = "AAPL") -> int:
+    store = SqliteStore(db, read_only=True)
+    try:
+        (ref,) = [r for r in store.list_refs("ohlcv") if symbol in r.key_json]
+        return ref.id
+    finally:
+        store.close()
+
+
+def test_impact_of_a_change_counts_by_recipe(db: Path) -> None:
+    code, text = run("impact", "--db", str(db), "--changed", str(_ohlcv_id(db)))
+    assert code == 0
+    assert "would be marked stale: 1" in text
+    assert "sma v3" in text
+
+
+def test_impact_summarizes_unless_asked_to_enumerate(db: Path) -> None:
+    summary = run_json("impact", "--db", str(db), "--changed", str(_ohlcv_id(db)), "--json")
+    listed = run_json("impact", "--db", str(db), "--changed", str(_ohlcv_id(db)), "--all", "--json")
+    assert summary["groups"][0]["artifacts"] == []
+    assert len(listed["groups"][0]["artifacts"]) == 1
+
+
+def test_impact_of_a_bump_states_that_nothing_goes_stale(db: Path) -> None:
+    """The wording is the feature: rule 8 is what a new reader most needs explained."""
+    code, text = run("impact", "--db", str(db), "--bump", "ohlcv")
+    assert code == 0
+    assert "marks NOTHING stale" in text
+    assert "rule 8" in text
+    assert "become unreachable" in text
+    assert "re-resolve on their next read" in text
+
+
+def test_impact_of_a_drop_shows_deletions_and_invalidations(db: Path) -> None:
+    code, text = run("impact", "--db", str(db), "--drop", "ohlcv")
+    assert code == 0
+    assert "deleted: 2" in text
+    assert "marked stale: 2" in text
+
+
+def test_impact_drop_does_not_drop_anything(db: Path) -> None:
+    """`drop` is not a command here; seeing what it would do is the useful half."""
+    before = run_json("stats", "--db", str(db), "--json")
+    run("impact", "--db", str(db), "--drop", "ohlcv", "--all")
+    assert run_json("stats", "--db", str(db), "--json") == before
+
+
+def test_impact_takes_one_question_at_a_time(db: Path) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        run("impact", "--db", str(db), "--changed", "1", "--bump", "ohlcv")
+    assert excinfo.value.code == 2
+
+
+def test_impact_needs_a_question(db: Path) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        run("impact", "--db", str(db))
+    assert excinfo.value.code == 2
+
+
+def test_impact_version_only_goes_with_drop(db: Path) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        run("impact", "--db", str(db), "--bump", "ohlcv", "--version", "1")
+    assert excinfo.value.code == 2
+
+
+def test_drawing_an_impact_set_requires_asking_for_it(
+    db: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A default that renders 255,000 nodes to DOT would help nobody."""
+    assert (
+        run("impact", "--db", str(db), "--changed", str(_ohlcv_id(db)), "--format", "dot")[0] == 1
+    )
+    assert "needs --all" in capsys.readouterr().err
+
+    code, text = run(
+        "impact", "--db", str(db), "--changed", str(_ohlcv_id(db)), "--all", "--format", "dot"
+    )
+    assert code == 0
+    assert "digraph" in text
+
+
+def test_drawing_an_impact_set_emits_one_document(db: Path) -> None:
+    """Two `graph LR` blocks are not a Mermaid document, and a bump has three groups."""
+    _code, dot = run("impact", "--db", str(db), "--bump", "ohlcv", "--all", "--format", "dot")
+    assert dot.count("digraph") == 1
+    _code, mermaid = run(
+        "impact", "--db", str(db), "--bump", "ohlcv", "--all", "--format", "mermaid"
+    )
+    assert mermaid.count("graph LR") == 1
+    assert mermaid.startswith("%%"), "the group labels are comments in the emitted language"
+
+
+# --- cost ------------------------------------------------------------------
+
+
+def test_cost_reports_the_closure_and_makes_the_deduplication_visible(db: Path) -> None:
+    code, text = run("cost", "--db", str(db), "--id", str(_sma_id(db)))
+    assert code == 0
+    assert "embodied compute" in text
+    assert "2 value(s) in 2 artifact(s)" in text
+    assert "per value, not per artifact" in text
+
+
+def test_cost_can_report_the_critical_path(db: Path) -> None:
+    code, text = run("cost", "--db", str(db), "--id", str(_sma_id(db)), "--critical-path")
+    assert code == 0
+    assert "critical path" in text
+
+
+def test_cost_by_recipe_rolls_up_without_walking_the_graph(db: Path) -> None:
+    code, text = run("cost", "--db", str(db), "--by-recipe")
+    assert code == 0
+    assert "ohlcv" in text and "sma" in text
+    assert "values" in text
+
+
+def test_cost_by_recipe_json_counts_values_and_artifacts_separately(db: Path) -> None:
+    rows = {
+        row["recipe"]: row for row in run_json("cost", "--db", str(db), "--by-recipe", "--json")
+    }
+    assert rows["sma"]["artifacts"] == 2
+    assert rows["sma"]["values"] == 2
+
+
+def test_cost_needs_an_artifact_or_by_recipe(db: Path) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        run("cost", "--db", str(db))
+    assert excinfo.value.code == 2
+
+
+def test_cost_by_recipe_takes_no_artifact(db: Path) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        run("cost", "--db", str(db), "--by-recipe", "--id", "1")
+    assert excinfo.value.code == 2
+
+
+def test_the_graph_commands_never_write(db: Path) -> None:
+    """Every command here is a question. None of them may touch the file."""
+    before = db.stat().st_mtime_ns, db.read_bytes()
+    run("lineage", "--db", str(db), "--id", str(_sma_id(db)))
+    run("impact", "--db", str(db), "--changed", str(_ohlcv_id(db)), "--all")
+    run("impact", "--db", str(db), "--bump", "ohlcv")
+    run("cost", "--db", str(db), "--by-recipe")
+    run("cost", "--db", str(db), "--id", str(_sma_id(db)), "--critical-path")
+    assert (db.stat().st_mtime_ns, db.read_bytes()) == before

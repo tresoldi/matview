@@ -40,6 +40,35 @@ Generated from the source.
 
 ::: matview.types.StoreResult
 
+## Graph queries
+
+Lineage, impact and cost over the DAG the cache recorded as it ran. See the
+[Graph queries](graph.md) page for what each one answers and how to read it.
+
+::: matview.graph.lineage
+
+::: matview.graph.impact_of_change
+
+::: matview.graph.impact_of_bump
+
+::: matview.graph.impact_of_drop
+
+::: matview.graph.embodied_cost
+
+::: matview.graph.critical_path
+
+::: matview.graph.recipe_costs
+
+::: matview.graph.ArtifactGraph
+
+::: matview.graph.ImpactReport
+
+::: matview.graph.ImpactGroup
+
+::: matview.graph.CostReport
+
+::: matview.graph.GraphStore
+
 ## Storage
 
 ::: matview.store.base.Store

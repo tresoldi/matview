@@ -9,13 +9,16 @@ The commands divide by what they need, and the division is the whole design:
   defaults are filled in *before* a key is hashed, so `show sma symbol=AAPL` cannot know
   the right `key_hash` unless something tells it what `interval` defaults to.
 - **`plan`** needs `--recipes`, because a plan resolves recipes.
+- **Graph queries** — `lineage`, `impact`, `cost` — are metadata too. They read the DAG
+  the cache recorded as it ran, so they need nothing imported either; see
+  `matview.graph`.
 
 Decoding a value needs neither. The codec is recorded on the recipe row, so `cat --id`
 decodes without importing anything — only a codec the *application* registered itself
 needs `--recipes`. See DECISIONS.md D37.
 
 Nothing here writes. `drop` and `gc` exist on `Cache`; they are deliberately not exposed
-yet.
+yet, and `impact --drop` shows what a drop would do — which is the useful half.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from typing import Any
 
 from matview.errors import MatviewError
 from matview.fingerprint import digest_bytes
+from matview.graph import ref_to_dict
 from matview.store.sqlite import SqliteStore, inspect_database
 from matview.types import ArtifactRef
 
@@ -156,21 +160,8 @@ def _emit(payload: Any, *, as_json: bool, out: Any, render: Callable[[], None]) 
 
 
 def _ref_dict(ref: ArtifactRef) -> dict[str, Any]:
-    return {
-        "id": ref.id,
-        "recipe": ref.recipe,
-        "version": ref.version,
-        "part": ref.part,
-        "valid": ref.valid,
-        "key_hash": ref.key_hash,
-        "key": json.loads(ref.key_json),
-        "digest": ref.digest,
-        "fingerprint": ref.fingerprint,
-        "n_bytes": ref.n_bytes,
-        "computed_at": ref.computed_at,
-        "refreshed_at": ref.refreshed_at,
-        "compute_ms": ref.compute_ms,
-    }
+    """The one JSON shape for an artifact, shared with `matview.graph`."""
+    return ref_to_dict(ref)
 
 
 def _resolve_target(store: SqliteStore, args: argparse.Namespace) -> list[ArtifactRef]:
@@ -561,6 +552,164 @@ def cmd_cat(args: argparse.Namespace, out: Any) -> int:
         store.close()
 
 
+def _resolve_one(store: SqliteStore, args: argparse.Namespace) -> ArtifactRef:
+    """One artifact, addressed the way `show` addresses one.
+
+    A graph question is about a single node, so a key that names several parts is an
+    error here rather than a silent choice of the first one.
+    """
+    refs = _resolve_target(store, args)
+    if args.part is not None:
+        refs = [ref for ref in refs if ref.part == args.part]
+    if len(refs) != 1:
+        raise MatviewError(
+            f"that names {len(refs)} artifacts; add --part, or use --id. "
+            f"Parts present: {', '.join(str(r.part) for r in refs)}"
+        )
+    return refs[0]
+
+
+def _format(args: argparse.Namespace) -> str:
+    """`--json` and `--format json` mean the same thing, so let either say it."""
+    return "json" if args.json else str(args.format)
+
+
+def cmd_lineage(args: argparse.Namespace, out: Any) -> int:
+    """Show what an artifact was built from, transitively."""
+    if args.recipes:
+        _load_recipes(args.recipes)
+    store = _open(args.db)
+    try:
+        from matview.graph import lineage
+
+        ref = _resolve_one(store, args)
+        graph = lineage(store, ref.id, depth=args.depth)
+        print(graph.render(_format(args)), file=out)
+        return OK
+    finally:
+        store.close()
+
+
+def cmd_impact(args: argparse.Namespace, out: Any) -> int:
+    """Show what a change, a version bump or a drop would reach. Reads only."""
+    store = _open(args.db)
+    try:
+        from matview.graph import (
+            impact_graph,
+            impact_of_bump,
+            impact_of_change,
+            impact_of_drop,
+        )
+
+        fmt = _format(args)
+        if fmt in ("dot", "mermaid") and not args.all:
+            raise MatviewError(
+                f"--format {fmt} draws the affected artifacts, so it needs --all.\n\n"
+                f"That set can be very large — one shared root in the recorded benchmark "
+                f"graph reaches 255,000 artifacts — which is why enumerating it is opt-in. "
+                f"Bound it with --depth or --limit."
+            )
+
+        if args.changed is not None:
+            report = impact_of_change(
+                store, args.changed, depth=args.depth, enumerate_all=args.all, limit=args.limit
+            )
+            root: int | None = args.changed
+        elif args.bump is not None:
+            report = impact_of_bump(store, args.bump, enumerate_all=args.all, limit=args.limit)
+            root = None
+        else:
+            report = impact_of_drop(
+                store, args.drop, version=args.version, enumerate_all=args.all, limit=args.limit
+            )
+            root = None
+
+        if fmt == "json":
+            print(json.dumps(report.to_json(), indent=2, sort_keys=True, default=str), file=out)
+        elif fmt == "tree":
+            print(report.describe(), file=out)
+        else:
+            # One document, so the output stays valid input for the tool that reads it.
+            # What each group holds is named in a leading comment; the counts are in the
+            # tree and JSON renderings, which is where a count belongs.
+            comment = "/* {} */" if fmt == "dot" else "%% {}"
+            print(comment.format(report.subject), file=out)
+            for group in report.groups:
+                print(comment.format(f"{group.label}: {group.total}"), file=out)
+            print(impact_graph(store, report, root).render(fmt), file=out)
+        return OK
+    finally:
+        store.close()
+
+
+def cmd_cost(args: argparse.Namespace, out: Any) -> int:
+    """Report what something cost to compute, per artifact closure or per recipe."""
+    if args.recipes:
+        _load_recipes(args.recipes)
+    store = _open(args.db)
+    try:
+        from matview.graph import embodied_cost, recipe_costs
+
+        if args.by_recipe:
+            costs = recipe_costs(store)
+            payload = [
+                {
+                    "recipe": c.recipe,
+                    "version": c.version,
+                    "codec": c.codec,
+                    "artifacts": c.artifacts,
+                    "values": c.values,
+                    "compute_ms": c.compute_ms,
+                    "mean_compute_ms": c.mean_compute_ms,
+                    "n_bytes": c.n_bytes,
+                }
+                for c in costs
+            ]
+
+            def render() -> None:
+                _table(
+                    [
+                        {
+                            "recipe": c.recipe,
+                            "v": c.version,
+                            "artifacts": c.artifacts,
+                            "values": c.values,
+                            "compute_ms": c.compute_ms,
+                            "mean_ms": "-"
+                            if c.mean_compute_ms is None
+                            else f"{c.mean_compute_ms:.1f}",
+                            "size": _human_bytes(c.n_bytes),
+                        }
+                        for c in costs
+                    ],
+                    ["recipe", "v", "artifacts", "values", "compute_ms", "mean_ms", "size"],
+                    out,
+                )
+                print(
+                    "\ncompute_ms is summed per value, not per artifact: every part of a "
+                    "partitioned\nvalue records the cost of the one compute that produced "
+                    "them all. `values` is that count.",
+                    file=out,
+                )
+
+            _emit(payload, as_json=args.json, out=out, render=render)
+            return OK
+
+        ref = _resolve_one(store, args)
+        report = embodied_cost(
+            store, ref.id, depth=args.depth, with_critical_path=args.critical_path
+        )
+        _emit(
+            report.to_json(),
+            as_json=args.json,
+            out=out,
+            render=lambda: print(report.describe(), file=out),
+        )
+        return OK
+    finally:
+        store.close()
+
+
 # --- argument parsing ------------------------------------------------------
 
 
@@ -641,6 +790,61 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--force-deps", action="store_true")
     plan.set_defaults(func=cmd_plan)
 
+    fmt = argparse.ArgumentParser(add_help=False)
+    fmt.add_argument(
+        "--format",
+        choices=("tree", "json", "dot", "mermaid"),
+        default="tree",
+        help="how to render the graph (--json is the same as --format json)",
+    )
+
+    lineage = subparsers.add_parser(
+        "lineage",
+        parents=[common, recipes, target, fmt],
+        help="what an artifact was built from, transitively",
+    )
+    lineage.add_argument("--depth", type=int, help="stop after this many levels")
+    lineage.set_defaults(func=cmd_lineage)
+
+    impact = subparsers.add_parser(
+        "impact",
+        parents=[common, fmt],
+        help="what a change, a version bump or a drop would reach",
+    )
+    question = impact.add_mutually_exclusive_group(required=True)
+    question.add_argument(
+        "--changed", type=int, metavar="ID", help="what would go stale if this artifact changed"
+    )
+    question.add_argument(
+        "--bump", metavar="RECIPE", help="what happens if this recipe's version is bumped"
+    )
+    question.add_argument(
+        "--drop", metavar="RECIPE", help="what cache.drop() would delete and mark stale"
+    )
+    impact.add_argument("--version", type=int, help="with --drop, only this recipe version")
+    impact.add_argument(
+        "--all", action="store_true", help="enumerate the affected artifacts, not just count them"
+    )
+    impact.add_argument("--depth", type=int, help="with --changed, stop after this many levels")
+    impact.add_argument("--limit", type=int, help="with --all, list at most this many per group")
+    impact.set_defaults(func=cmd_impact)
+
+    cost = subparsers.add_parser(
+        "cost",
+        parents=[common, recipes, target],
+        help="what something cost to compute",
+    )
+    cost.add_argument(
+        "--by-recipe", action="store_true", help="roll up every recipe version instead"
+    )
+    cost.add_argument(
+        "--critical-path",
+        action="store_true",
+        help="also report the most expensive chain through the closure",
+    )
+    cost.add_argument("--depth", type=int, help="stop after this many levels")
+    cost.set_defaults(func=cmd_cost)
+
     cat = subparsers.add_parser(
         "cat", parents=[common, recipes, target], help="print an artifact's decoded value"
     )
@@ -659,6 +863,16 @@ def main(argv: Sequence[str] | None = None, out: Any = None) -> int:
         parser.error(
             "plan needs --recipes MODULE: a plan resolves recipes, so they must be registered"
         )
+    if args.command == "cost":
+        addressed = args.id is not None or args.key_hash is not None or args.recipe is not None
+        if not args.by_recipe and not addressed:
+            parser.error(
+                "cost needs an artifact — --id, --key-hash, or a recipe and key — or --by-recipe"
+            )
+        if args.by_recipe and (addressed or args.critical_path or args.depth is not None):
+            parser.error("--by-recipe rolls up the whole database; it takes no artifact or depth")
+    if args.command == "impact" and args.version is not None and args.drop is None:
+        parser.error("--version selects a recipe version to drop, so it only goes with --drop")
     if not args.db:
         parser.error("no database given: pass --db PATH or set MATVIEW_DB")
 

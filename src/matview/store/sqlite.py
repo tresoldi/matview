@@ -111,6 +111,15 @@ def _id_set_predicate(artifact_ids: Sequence[int], *, negated: bool = False) -> 
     return f"{not_}IN (SELECT value FROM json_each(?))", json.dumps(artifact_ids)
 
 
+#: The two directions a walk of `dep` can take, as `(column to follow to, column to join
+#: on)`. Downward is the invalidation direction; upward is the lineage direction. They
+#: differ only in which end of the edge is which, which is why one CTE serves both.
+_WALK_DIRECTIONS: Final = {
+    "dependents": ("d.artifact_id", "d.dep_artifact_id"),
+    "inputs": ("d.dep_artifact_id", "d.artifact_id"),
+}
+
+
 class SqliteStore:
     """One SQLite file. Connections are per-thread, with WAL on."""
 
@@ -328,43 +337,113 @@ class SqliteStore:
 
     def deps_of(self, artifact_id: int) -> list[DepEdge]:
         """The stored edges of one artifact: what it actually read, last time it ran."""
-        rows = self._connect().execute(
-            "SELECT r.name, r.version, a.key_hash, a.key_json, a.part, d.dep_digest, a.id "
-            "FROM dep d JOIN artifact a ON a.id = d.dep_artifact_id "
-            "JOIN recipe r ON r.id = a.recipe_id WHERE d.artifact_id = ?",
-            (artifact_id,),
-        )
-        return [
-            DepEdge(
-                recipe=str(row["name"]),
-                version=int(row["version"]),
-                key_hash=str(row["key_hash"]),
-                part=row["part"],
-                digest=str(row["dep_digest"]),
-                artifact_id=int(row["id"]),
-                key_json=str(row["key_json"]),
-            )
-            for row in rows
-        ]
+        return self.deps_of_many([artifact_id])[artifact_id]
 
-    def dependents_of(self, artifact_ids: Sequence[int]) -> list[int]:
-        """Everything that transitively read these artifacts. Walks `dep_reverse`."""
+    def deps_of_many(self, artifact_ids: Sequence[int]) -> dict[int, list[DepEdge]]:
+        """The stored edges of many artifacts, in one query.
+
+        Keyed by the artifact asked about, with every requested id present: a root maps
+        to an empty list rather than being absent, so a caller can index the result
+        without deciding what a missing key would mean.
+
+        The graph queries need this; the scheduler does not, despite appearances. Its
+        two stored-subgraph walks loop over the *parts of one node*, so batching across
+        that loop saves nothing and measured slower — see DECISIONS.md D52. `deps_of`
+        delegates here rather than keeping a second query, so the two cannot drift.
+        """
+        edges: dict[int, list[DepEdge]] = {int(i): [] for i in artifact_ids}
+        if not edges:
+            return edges
+        # A single id is the overwhelmingly common call — the scheduler asks about one
+        # node's parts at a time — and `json_each` is measurably more expensive than an
+        # equality test. Batching is for the graph queries, and it must not make the hot
+        # stale-verification path pay for them. See DECISIONS.md D50.
+        predicate: str
+        param: int | str
+        if len(edges) == 1:
+            predicate, param = "= ?", next(iter(edges))
+        else:
+            predicate, param = _id_set_predicate(list(edges))
+        rows = self._connect().execute(
+            "SELECT d.artifact_id AS dependent_id, r.name, r.version, a.key_hash, "
+            "a.key_json, a.part, d.dep_digest, a.id "
+            "FROM dep d JOIN artifact a ON a.id = d.dep_artifact_id "
+            f"JOIN recipe r ON r.id = a.recipe_id WHERE d.artifact_id {predicate} "
+            "ORDER BY d.artifact_id, a.id",
+            (param,),
+        )
+        for row in rows:
+            edges[int(row["dependent_id"])].append(
+                DepEdge(
+                    recipe=str(row["name"]),
+                    version=int(row["version"]),
+                    key_hash=str(row["key_hash"]),
+                    part=row["part"],
+                    digest=str(row["dep_digest"]),
+                    artifact_id=int(row["id"]),
+                    key_json=str(row["key_json"]),
+                )
+            )
+        return edges
+
+    def dependents_of(self, artifact_ids: Sequence[int], *, depth: int | None = None) -> list[int]:
+        """Everything that transitively read these artifacts. Walks `dep_reverse`.
+
+        The roots themselves are excluded. `depth=1` stops at direct dependents,
+        `depth=None` walks the whole closure.
+        """
+        return self._walk(artifact_ids, direction="dependents", depth=depth)
+
+    def inputs_of(self, artifact_ids: Sequence[int], *, depth: int | None = None) -> list[int]:
+        """Everything these artifacts transitively read: the input closure.
+
+        The mirror of `dependents_of`, following `dep` the other way, and with the same
+        contract — the roots themselves are excluded from the result, and `depth=1` stops
+        after one level. This is the walk that answers "which raw inputs produced this
+        number?", which is the audit question and the reproducibility question both.
+
+        Nothing here resolves a recipe. It reads the observed DAG as recorded, so it
+        works against a database whose recipes this process has never imported.
+        """
+        return self._walk(artifact_ids, direction="inputs", depth=depth)
+
+    def _walk(self, artifact_ids: Sequence[int], *, direction: str, depth: int | None) -> list[int]:
+        """One recursive CTE, run in whichever direction along `dep` is asked for.
+
+        Two shapes rather than one, because the depth bound and cycle termination pull in
+        opposite directions. Unbounded, the CTE deduplicates on the id alone, so a cycle —
+        which the scheduler forbids but a corrupted file can still contain — terminates
+        instead of hanging. Bounded, it has to carry a level, which makes the same node at
+        two different depths two distinct rows; there the level bound is what terminates
+        it. Both are needed and neither covers the other's case.
+        """
         if not artifact_ids:
             return []
+        select, join = _WALK_DIRECTIONS[direction]
         roots_predicate, roots_json = _id_set_predicate(artifact_ids)
         excluded_predicate, excluded_json = _id_set_predicate(artifact_ids, negated=True)
-        rows = self._connect().execute(
-            f"""
-            WITH RECURSIVE affected(id) AS (
+        if depth is None:
+            sql = f"""
+            WITH RECURSIVE reached(id) AS (
               SELECT id FROM artifact WHERE id {roots_predicate}
               UNION
-              SELECT d.artifact_id FROM dep d JOIN affected a ON d.dep_artifact_id = a.id
+              SELECT {select} FROM dep d JOIN reached w ON {join} = w.id
             )
-            SELECT id FROM affected WHERE id {excluded_predicate} ORDER BY id
-            """,
-            (roots_json, excluded_json),
-        )
-        return [int(row["id"]) for row in rows]
+            SELECT DISTINCT id FROM reached WHERE id {excluded_predicate} ORDER BY id
+            """
+            params: tuple[Any, ...] = (roots_json, excluded_json)
+        else:
+            sql = f"""
+            WITH RECURSIVE reached(id, level) AS (
+              SELECT id, 0 FROM artifact WHERE id {roots_predicate}
+              UNION
+              SELECT {select}, w.level + 1 FROM dep d JOIN reached w ON {join} = w.id
+              WHERE w.level < ?
+            )
+            SELECT DISTINCT id FROM reached WHERE id {excluded_predicate} ORDER BY id
+            """
+            params = (roots_json, max(depth, 0), excluded_json)
+        return [int(row["id"]) for row in self._connect().execute(sql, params)]
 
     def query(self, recipe: str | None = None, **indexed_fields: object) -> list[ArtifactRef]:
         joins: list[str] = []
@@ -446,6 +525,40 @@ class SqliteStore:
         )
         return None if row is None else _ref_from_row(row)
 
+    def refs_by_ids(self, artifact_ids: Sequence[int]) -> list[ArtifactRef]:
+        """Metadata for many artifacts by row id, in one query, ordered by id.
+
+        Ids that name no row are silently absent rather than an error: a caller holding
+        ids from a graph walk wants what is there, and the walk cannot produce an id that
+        was not in the database when it ran.
+        """
+        if not artifact_ids:
+            return []
+        predicate, ids_json = _id_set_predicate(list(artifact_ids))
+        return [
+            _ref_from_row(row)
+            for row in self._connect().execute(
+                f"SELECT {_ARTIFACT_COLUMNS} FROM artifact a "
+                f"JOIN recipe r ON r.id = a.recipe_id WHERE a.id {predicate} ORDER BY a.id",
+                (ids_json,),
+            )
+        ]
+
+    def ids_of_recipe(self, recipe: str, version: int | None = None) -> list[int]:
+        """Every artifact row id belonging to a recipe, or to one version of it.
+
+        Ids rather than refs because the callers — `drop()` and the impact queries —
+        want a set to walk the graph from, and a recipe with 250,000 artifacts should not
+        have its metadata materialized to answer that.
+        """
+        sql = "SELECT a.id FROM artifact a JOIN recipe r ON r.id = a.recipe_id WHERE r.name = ?"
+        params: list[Any] = [recipe]
+        if version is not None:
+            sql += " AND r.version = ?"
+            params.append(version)
+        sql += " ORDER BY a.id"
+        return [int(row["id"]) for row in self._connect().execute(sql, params)]
+
     def fetch_by_id(self, artifact_id: int) -> Artifact | None:
         """One artifact including its payload, by row id."""
         row = (
@@ -476,6 +589,26 @@ class SqliteStore:
         sql += " ORDER BY r.name, r.version, a.part IS NOT NULL, a.part"
         return [_ref_from_row(row) for row in self._connect().execute(sql, params)]
 
+    def counts_by_recipe(self, artifact_ids: Sequence[int]) -> list[dict[str, Any]]:
+        """Group a set of artifact ids by recipe version, counting in SQL.
+
+        The point is not to materialize the set. One shared root's dependent closure in
+        the recorded 250k profile is 255,000 artifacts, and the useful answer about it is
+        a handful of counts — which this produces without ever building 255,000
+        `ArtifactRef` objects to throw away.
+        """
+        if not artifact_ids:
+            return []
+        predicate, ids_json = _id_set_predicate(list(artifact_ids))
+        rows = self._connect().execute(
+            "SELECT r.name, r.version, COUNT(*) AS artifacts, "
+            "COALESCE(SUM(a.valid = 0), 0) AS invalid "
+            "FROM artifact a JOIN recipe r ON r.id = a.recipe_id "
+            f"WHERE a.id {predicate} GROUP BY r.id ORDER BY r.name, r.version",
+            (ids_json,),
+        )
+        return [dict(row) for row in rows]
+
     def recipe_rows(self) -> list[dict[str, Any]]:
         """Every recipe version the database knows about, with its artifact count.
 
@@ -495,6 +628,43 @@ class SqliteStore:
         )
         return [dict(row) for row in rows]
 
+    def recipe_cost_rows(self) -> list[dict[str, Any]]:
+        """Per recipe version: artifacts, distinct values, cost and bytes.
+
+        The sibling of `recipe_rows()` rather than an extension of it, because the
+        deduplication below costs a grouped scan that `stats` has no reason to pay for.
+
+        `compute_ms` is summed **per value, not per artifact**. A partitioned value is
+        several artifact rows that each record the cost of the one compute that produced
+        them all, so summing the column would multiply that value's cost by its part
+        count. `MAX` picks the one shared figure back out of the group. See DECISIONS.md
+        D51; this is the single most likely place in these queries to be confidently
+        wrong.
+        """
+        rows = self._connect().execute(
+            """
+            SELECT r.name, r.version, r.codec,
+                   COUNT(a.id) AS artifacts,
+                   COUNT(DISTINCT a.key_hash) AS n_values,
+                   COALESCE(SUM(a.n_bytes), 0) AS n_bytes,
+                   COALESCE((
+                     SELECT SUM(v.compute_ms) FROM (
+                       SELECT MAX(a2.compute_ms) AS compute_ms FROM artifact a2
+                       WHERE a2.recipe_id = r.id GROUP BY a2.key_hash
+                     ) v
+                   ), 0) AS compute_ms
+            FROM recipe r LEFT JOIN artifact a ON a.recipe_id = r.id
+            GROUP BY r.id ORDER BY r.name, r.version
+            """
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            entry = dict(row)
+            values = int(entry["n_values"])
+            entry["mean_compute_ms"] = None if not values else int(entry["compute_ms"]) / values
+            out.append(entry)
+        return out
+
     def summary(self) -> dict[str, Any]:
         """Aggregates for the whole database, computed in SQL rather than in Python.
 
@@ -507,13 +677,25 @@ class SqliteStore:
             SELECT COUNT(*) AS artifacts,
                    COALESCE(SUM(n_bytes), 0) AS n_bytes,
                    COALESCE(SUM(valid = 0), 0) AS invalid,
-                   COALESCE(SUM(compute_ms), 0) AS compute_ms,
                    MIN(computed_at) AS oldest,
                    MAX(computed_at) AS newest,
                    MAX(n_bytes) AS largest
             FROM artifact
             """
         ).fetchone()
+        # Deliberately not `SUM(compute_ms)` over `artifact`, which is what this used to
+        # be and what it reported wrongly. Every part of a partitioned value carries the
+        # cost of the one compute that produced all of them, so the plain sum multiplies
+        # such a value by its part count. See DECISIONS.md D51.
+        cost = conn.execute(
+            """
+            SELECT COALESCE(SUM(v.compute_ms), 0) AS compute_ms, COUNT(*) AS n_values
+            FROM (
+              SELECT MAX(compute_ms) AS compute_ms FROM artifact GROUP BY recipe_id, key_hash
+            ) v
+            """
+        ).fetchone()
+        recipes = self.recipe_rows()
         return {
             "path": self.path,
             "schema_version": self.meta("schema_version"),
@@ -522,11 +704,12 @@ class SqliteStore:
             "invalid": int(totals["invalid"]),
             "n_bytes": int(totals["n_bytes"]),
             "largest_artifact_bytes": None if totals["largest"] is None else int(totals["largest"]),
-            "compute_ms": int(totals["compute_ms"]),
+            "compute_ms": int(cost["compute_ms"]),
+            "values": int(cost["n_values"]),
             "oldest_computed_at": None if totals["oldest"] is None else int(totals["oldest"]),
             "newest_computed_at": None if totals["newest"] is None else int(totals["newest"]),
-            "recipes": len({row["name"] for row in self.recipe_rows()}),
-            "recipe_versions": len(self.recipe_rows()),
+            "recipes": len({row["name"] for row in recipes}),
+            "recipe_versions": len(recipes),
             "dep_edges": int(conn.execute("SELECT COUNT(*) FROM dep").fetchone()[0]),
             "pending_tasks": int(conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]),
         }
@@ -841,12 +1024,7 @@ class SqliteStore:
 
     def drop(self, recipe: str, version: int | None = None) -> int:
         """Remove a recipe version's artifacts. See DECISIONS.md D19."""
-        sql = "SELECT a.id FROM artifact a JOIN recipe r ON r.id = a.recipe_id WHERE r.name = ?"
-        params: list[Any] = [recipe]
-        if version is not None:
-            sql += " AND r.version = ?"
-            params.append(version)
-        ids = [int(r["id"]) for r in self._connect().execute(sql, params)]
+        ids = self.ids_of_recipe(recipe, version)
         if not ids:
             return 0
 

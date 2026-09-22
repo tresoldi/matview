@@ -22,6 +22,7 @@ MODULES = [
     "matview.errors",
     "matview.fingerprint",
     "matview.foreign",
+    "matview.graph",
     "matview.policy",
     "matview.registry",
     "matview.store",

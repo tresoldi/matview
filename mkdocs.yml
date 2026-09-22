@@ -49,6 +49,7 @@ nav:
   - Home: index.md
   - Guide: guide.md
   - Command line: cli.md
+  - Graph queries: graph.md
   - Performance: performance.md
   - API reference: reference.md
   - Design spec: design-spec.md

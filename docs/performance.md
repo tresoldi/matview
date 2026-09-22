@@ -39,7 +39,59 @@ operation necessarily has identical median and p95.
 | `drop("indicator")` | 250,000 artifacts removed | 1 | 29.486 | 29.486 | 8,479 artifacts/s |
 | `matview verify` | 265,001 payloads | 1 | 0.840 | 0.840 | 315,454 artifacts/s |
 | `get_many()` | 1,000 aggregate roots | 3 | 0.040 | 0.043 | 24,880 roots/s |
-| `plan_many()` | 1,000 aggregate roots | 3 | 3.433 | 5.191 | 291 roots/s |
+| `plan_many()` | 1,000 aggregate roots | 3 | 3.433 | 5.191 | 291 roots/s (superseded, see below) |
+
+## A second machine, and a superseded `plan_many` figure
+
+The `plan_many` row above is **superseded**. It is kept because the rest of the table is
+from the same run on the same machine, and replacing one cell with a figure from another
+would silently make the table incomparable with itself.
+
+The graph-query work re-ran `plan_many` while investigating an expected N+1. That
+re-run is on a different machine and is roughly three times slower on the same cold
+write (155 s against 53.8 s), so only the before/after pair below is meaningful — not
+either figure against the table.
+
+Measured 2026-09-22, same 250k profile, five samples per run, two runs each:
+
+| `plan_many`, 1,000 aggregate roots | Median | Throughput |
+| --- | ---: | ---: |
+| Before: one `deps_of` per node | 3.654 s, 3.637 s | 274, 275 roots/s |
+| `deps_of_many`, no single-id fast path | 4.262 s | 235 roots/s |
+| `deps_of_many`, with the fast path | 3.857 s, 3.732 s | 259, 268 roots/s |
+| **Shipped**: `deps_of` again | 3.724 s | 269 roots/s |
+
+The batching was expected to be a free speedup and is a regression at every size. The
+premise was wrong: the loop that looked like an N+1 iterates over the *parts of one
+node*, so for an unpartitioned value it runs once and there is nothing to batch across.
+Both call sites therefore keep `deps_of`, and carry a comment saying why the
+obvious-looking cleanup is not one.
+
+`plan_many` is still genuinely slow against `get_many`, and its N+1 is real — one
+`deps_of` and one `fetch_all_parts` per node visited in a depth-first descent. A node's
+edges have to be read before its children can be resolved, so removing it means
+restructuring the suspending walk level by level. That is a scheduler change, and it has
+not been made. See DECISIONS.md D52.
+
+## Graph queries
+
+Measured on the same second machine and the same 250k profile, so these are comparable
+with the table above only in shape, not in absolute time. Five samples each, three for
+the impact walk.
+
+| Query | Work | Median | P95 |
+| --- | ---: | ---: | ---: |
+| `lineage()` of an aggregate | 52 nodes | 0.0010 s | 0.0018 s |
+| `embodied_cost()` of an aggregate | 52 values | 0.0006 s | 0.0009 s |
+| `critical_path()` of an aggregate | 3 steps | 0.0009 s | 0.0011 s |
+| `impact --changed` on the shared root | 255,000 dependents, summarized | 0.87 s | 0.89 s |
+| `recipe_costs()` | 265,001 artifacts | 1.48 s | 1.53 s |
+
+Input closures are small in this shape, which is what makes the Python topological walk
+behind `critical_path` the right tool for it. The impact figure is the *summary* path:
+it counts in SQL and never builds 255,000 `ArtifactRef` objects, which is why
+enumeration is behind `--all`. `recipe_costs()` is a full grouped scan and pays for the
+deduplication that makes its `compute_ms` correct.
 
 ## What this covers
 

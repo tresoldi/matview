@@ -16,6 +16,33 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Added
 
+- Graph queries over the DAG the cache records as it runs, in a new `matview.graph`
+  module and three read-only commands. `lineage` walks upward to the raw inputs that
+  produced a value — the question the library recorded everything for and could not
+  answer. `impact` answers what a changed artifact, a recipe version bump or a `drop`
+  would reach. `cost` reports embodied `compute_ms` over an input closure, a per-recipe
+  rollup, and the critical path through a closure. Four renderings each: indented tree,
+  JSON, Graphviz DOT and Mermaid.
+
+  None of them needs `--recipes`: they read the recorded graph, so they work against a
+  database whose recipes the process has never imported. None of them writes, `impact
+  --drop` included.
+
+  `impact` prints per-recipe counts by default and enumerates only under `--all`. One
+  shared root in the 250k benchmark profile reaches 255,000 dependents.
+
+  `impact --bump` exists mainly to state plainly what rule 8 means: bumping a recipe's
+  version marks **nothing** stale, because a dependency's recipe version is not part of a
+  dependent's fingerprint. The artifacts become unreachable, each dependent re-resolves
+  at the new version on its next read, and the cascade runs only if the recomputed bytes
+  differ. That is early cutoff, and it is the part of the fingerprint spec that confuses
+  every new reader.
+
+- `SqliteStore.inputs_of()`, the transitive upward walk, mirroring `dependents_of()`.
+  Both now take a `depth`. Both terminate on a cycle a corrupted database could contain
+  rather than hanging. Also `deps_of_many()`, `refs_by_ids()`, `ids_of_recipe()`,
+  `counts_by_recipe()` and `recipe_cost_rows()`.
+
 - Generic recipe `max_age` freshness, backed by a distinct `refreshed_at` clock so a
   successful refresh with unchanged bytes becomes fresh without rewriting content
   history. Scheduling and domain calendars remain caller concerns. The new artifact
@@ -77,6 +104,13 @@ First working version, not yet published. Will be released as 0.1.0.
 
 ### Fixed
 
+- `SqliteStore.summary()` overcounted `compute_ms`. It summed the column over artifact
+  rows, and every part of a partitioned value records the cost of the single compute that
+  produced them all — so a three-part value was counted three times. It now groups by
+  `(recipe, version, key_hash)` and reports a `values` count beside `artifacts`, so the
+  deduplication is visible rather than implicit. Every cost aggregate added in this
+  release does the same.
+
 - Maintenance operations over large artifact sets no longer exceed SQLite's bound-variable
   limit, and cache verification now uses keyed rather than `OFFSET` pagination. SQLite
   JSON1 (included by default in SQLite 3.38+) is required and checked when opening a store.
@@ -111,3 +145,8 @@ First working version, not yet published. Will be released as 0.1.0.
 
 - Every choice made where the design document was silent is recorded, with its
   reasoning, in [`DECISIONS.md`](DECISIONS.md).
+- `plan_many()` remains roughly two orders of magnitude slower per root than
+  `get_many()`, and the batching that was expected to close the gap does not: the loop it
+  would batch is over the parts of one node, not over nodes. The real N+1 is across the
+  depth-first descent and removing it is a scheduler change. Measured both ways; see
+  DECISIONS.md D52 and [`docs/performance.md`](docs/performance.md).

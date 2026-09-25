@@ -139,7 +139,6 @@ uv run --extra npy   python examples/linguistics/pipeline.py    # a foreign reci
 | --- | --- |
 | [`docs/design-spec.md`](docs/design-spec.md) | The full design spec. The source of truth for behaviour. |
 | [`SPEC.md`](SPEC.md) | Canonicalization and fingerprints, verbatim and independently versioned. The cross-language interoperability contract. |
-| [`PLAN.md`](PLAN.md) | Build order, stage by stage, and the ten invariants with the test that pins each one. |
 | [`DECISIONS.md`](DECISIONS.md) | Every choice made where the spec was silent, with the reasoning. |
 | [`ROADMAP.md`](ROADMAP.md) | Candidates for future work, and what is deliberately excluded. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release notes. Note that `SPEC.md` is versioned separately and deliberately. |

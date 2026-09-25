@@ -56,12 +56,10 @@ version when the capability is absent.
 - **[API reference](reference.md)** — generated from the source.
 - **[Design spec](design-spec.md)** — the full design document this was built from.
 
-Three documents live at the repository root rather than here, deliberately:
+Two documents live at the repository root rather than here, deliberately:
 
 - [`SPEC.md`](https://github.com/tresoldi/matview/blob/main/SPEC.md) is the
   cross-language interoperability contract for canonicalization and fingerprints. A
   second copy of it that could drift from the first would be worse than no copy.
 - [`DECISIONS.md`](https://github.com/tresoldi/matview/blob/main/DECISIONS.md) records
   every choice made where the design spec was silent.
-- [`PLAN.md`](https://github.com/tresoldi/matview/blob/main/PLAN.md) is the build plan,
-  kept for its reasoning.

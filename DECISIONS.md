@@ -777,3 +777,20 @@ This is what lets one value type and one set of four renderers serve both lineag
 enumerated impact set. The DOT and Mermaid renderings point their arrows the way data
 flows — dependency to dependent — in both directions, because that is the reading a
 provenance graph gets from anyone looking at one.
+
+## D55 — The build-order documents are pruned at first release, not published
+
+`PLAN.md` and the two handoff plans under `plans/` described work that is finished. They
+were written for whoever was building the thing next, and a reader arriving at a released
+library reads them as current intent instead — a plan that says "not started" about
+something that shipped is worse than no plan at all.
+
+They are removed rather than moved under `docs/`, because git history keeps them and the
+reasoning worth keeping outlived them: the ten rules and their test names are in
+`CLAUDE.md`, the measurements from the 250k plan are in `docs/performance.md`, and what
+the graph-query plan concluded is in `docs/graph.md` and in D49–D54.
+
+`DECISIONS.md` and `ROADMAP.md` stay at the root and stay public. They are not records of
+work in progress: one says why the code is the way it is, the other says what is
+deliberately *not* being built, and both answer questions a user of a released library
+actually asks.

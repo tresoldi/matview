@@ -87,8 +87,7 @@ SQL placeholder per artifact id, and SQLite's compiled limit is 32,766 on builds
 3.32 and 999 before that — so `drop()` over tens of thousands of artifacts is a hard
 failure on a plausible interpreter, not a slow one. `iter_payloads` also paginated with
 `OFFSET`, making `matview verify` quadratic. Both are fixed; the recorded baseline is in
-[docs/performance.md](docs/performance.md) and the harness in `benchmarks/`. The plan that
-drove the work is kept at [plans/250k-scale.md](plans/250k-scale.md).
+[docs/performance.md](docs/performance.md) and the harness in `benchmarks/`.
 
 What the baseline leaves open: `plan_many` runs at 291 roots/s against `get_many`'s
 24,880, because the scheduler asks the store for one node's dependencies at a time.
@@ -123,7 +122,7 @@ true, and it is now pinned by golden fixtures and checked at the version floor.
 
 ---
 
-### Lineage, impact and cost — built, see [plans/graph-queries.md](plans/graph-queries.md)
+### Lineage, impact and cost — built, see [graph queries](docs/graph.md)
 
 matview recorded a complete observed DAG and offered almost no way to interrogate it:
 `deps_of` returned one level, `dependents_of` walked downward only and returned bare ids,

@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+import matview
 from matview import Cache, Registry, SqliteStore, recipe
 from matview.cli import main
 from matview.registry import REGISTRY
@@ -661,3 +662,21 @@ def test_the_graph_commands_never_write(db: Path) -> None:
     run("cost", "--db", str(db), "--by-recipe")
     run("cost", "--db", str(db), "--id", str(_sma_id(db)), "--critical-path")
     assert (db.stat().st_mtime_ns, db.read_bytes()) == before
+
+
+def test_version_reports_the_installed_library(capsys: pytest.CaptureFixture) -> None:
+    """`matview --version` is the library's version, and the flag stays top-level only.
+
+    Several subcommands take a `--version` that filters by *recipe* version. That
+    collision is why this one is not on `common`: the two meanings would be
+    indistinguishable on the same command line.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--version"])
+    assert excinfo.value.code == 0
+    assert capsys.readouterr().out.strip() == f"matview {matview.__version__}"
+
+
+def test_a_subcommand_version_still_filters_by_recipe_version(db: Path) -> None:
+    rows = run_json("ls", "--db", str(db), "--json", "--recipe", "sma", "--version", "3")
+    assert rows and all(row["version"] == 3 for row in rows)

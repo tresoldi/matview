@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from matview import __version__
 from matview.errors import MatviewError
 from matview.fingerprint import digest_bytes
 from matview.graph import ref_to_dict
@@ -717,6 +718,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
         description="Inspect a matview cache database. Nothing here writes to it.",
+    )
+    # Deliberately on the top-level parser only. Several subcommands already take a
+    # `--version` that filters by *recipe* version, which is the meaning that matters
+    # once you have a database in hand; `matview --version` reports the installed
+    # library, which is what a bug report needs.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="print the installed matview version and exit",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

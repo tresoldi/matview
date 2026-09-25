@@ -19,6 +19,8 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
   "Topic :: Database",
   "Topic :: Software Development :: Build Tools",
   "Typing :: Typed",
@@ -41,7 +43,7 @@ Changelog = "https://github.com/tresoldi/matview/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # Codecs are extras so the core installs with no heavy dependencies.
 # Floors are the oldest versions the cross-version byte-determinism job actually
-# checks; see docs/ci-workflow.yml and DECISIONS.md D29.
+# checks; see the codec-floor target in the Makefile and DECISIONS.md D29.
 arrow = ["polars>=1.20", "pyarrow>=16.0"]
 # Same Arrow bytes as the `arrow` codec, decoded to a pandas DataFrame.
 pandas = ["pandas>=2.2", "pyarrow>=16.0"]

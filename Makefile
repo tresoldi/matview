@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help format quality format-check lint typecheck test test-core test-all \
-        test-cov codec-floor docs docs-serve build clean install
+        test-cov codec-floor docs docs-serve build release-check clean install
 
 # The package path to lint and typecheck. Under src/ so that tests import the
 # *installed* package rather than the working directory: a packaging mistake — a missing
@@ -83,7 +83,21 @@ docs-serve:  ## Serve the documentation site with live reload
 	uv run --extra docs mkdocs serve
 
 build:  ## Build sdist and wheel
+	rm -rf dist
 	uv build
+
+# What a published release is checked against before it exists. The suite proves the code
+# works from the working tree; this proves the *distribution* works: that its metadata is
+# valid on an index, that the wheel imports with nothing else installed, that py.typed
+# actually shipped, and that the console script resolves. Each of those has a failure mode
+# the test suite cannot see, because the tests import an editable install.
+release-check: build  ## Build, validate the metadata and smoke-test the wheel in isolation
+	uvx twine check --strict dist/*
+	@wheel=$$(ls dist/*.whl) ; set -e ; \
+	python -c "import sys, zipfile; names = zipfile.ZipFile(sys.argv[1]).namelist(); \
+	sys.exit(0) if 'matview/py.typed' in names else sys.exit('py.typed missing from ' + sys.argv[1])" $$wheel ; \
+	uv run --no-project --isolated --with $$wheel python -c 'import matview; print("import ok:", matview.__version__)' ; \
+	uv run --no-project --isolated --with $$wheel matview --version
 
 clean:  ## Remove build artifacts and caches
 	rm -rf dist build site .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov

@@ -1,8 +1,11 @@
 # Working on matview
 
-Read `docs/design-spec.md` before changing behaviour, `PLAN.md` for what stage the
-work is in, and `DECISIONS.md` for what has already been settled where the spec was
+Read `docs/design-spec.md` before changing behaviour, `ROADMAP.md` for what is and is
+not planned, and `DECISIONS.md` for what has already been settled where the spec was
 silent. Add an entry to `DECISIONS.md` for every new judgement call; the spec requires it.
+
+Each of the ten rules below has a test named after it in `tests/test_hard_rules.py`, so a
+violation names itself in CI output.
 
 ## Rules that are not style preferences
 

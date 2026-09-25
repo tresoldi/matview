@@ -54,7 +54,6 @@ nav:
   - API reference: reference.md
   - Design spec: design-spec.md
 
-# SPEC.md, DECISIONS.md and PLAN.md deliberately stay at the repository root and are
-# linked to rather than copied in. SPEC.md is the cross-language interoperability
-# contract, and a second copy of it that could drift from the first is worse than no
-# copy at all.
+# SPEC.md and DECISIONS.md deliberately stay at the repository root and are linked to
+# rather than copied in. SPEC.md is the cross-language interoperability contract, and a
+# second copy of it that could drift from the first is worse than no copy at all.

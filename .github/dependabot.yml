@@ -1,0 +1,12 @@
+# Action versions only. The Python dependencies are deliberately declared as ranges with
+# floors the codec-floor job actually checks, so a bot raising the floors would be
+# undoing that on purpose rather than by accident.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

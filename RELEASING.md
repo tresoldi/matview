@@ -48,7 +48,9 @@ can do. Nothing below has to be repeated per release.
 2. Bump `__version__` in `src/matview/__init__.py`.
 3. `CHANGELOG.md`: retitle `## [Unreleased]` to `## [x.y.z] — YYYY-MM-DD` and open a
    fresh empty `## [Unreleased]` above it. The release notes are taken verbatim from this
-   section, and the workflow fails if there is no section matching the tag.
+   section, and the workflow fails if there is no section matching the tag — so read the
+   section as a reader of the release page would, and drop any "not yet published"
+   framing left in its body.
 4. `CITATION.cff`: set `version` and `date-released`.
 5. `make release-check` — builds the sdist and wheel, validates the metadata the way an
    index does, and installs the wheel in isolation to confirm it imports, ships

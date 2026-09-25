@@ -101,6 +101,11 @@ First working version, not yet published. Will be released as 0.1.0.
   node wanted it rather than only that it is missing.
 - `SqliteStore` refuses a database whose `schema_version` it does not implement, as it
   already did for `fingerprint_spec_version`.
+- `matview --version`, on the top-level parser only. Several subcommands already take a
+  `--version` that filters by recipe version, and the two meanings cannot share a
+  command line.
+- Python 3.14 is supported and classified. The full suite with every codec extra passes on
+  it, and the golden codec fixtures match, so stored artifacts are portable across it.
 
 ### Fixed
 

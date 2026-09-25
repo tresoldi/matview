@@ -822,3 +822,23 @@ The workflow is staged under `ops/workflows/` rather than installed because push
 file that does not exist yet is staged; the installed `ci.yml` and `docs.yml` are not
 copied there, since two copies of a workflow drift and the repository already refuses that
 trade for `SPEC.md`.
+
+## D57 — Published for use, not for collaboration, and the security posture says what it trusts
+
+The README states that pull requests may sit unreviewed and asks for an issue first. The
+alternative — the full community scaffolding of a contributing guide, a code of conduct
+and issue templates — advertises a review capacity that one maintainer does not have, and
+an unanswered pull request costs a contributor more than a stated policy does. Bug reports
+are still wanted; what is declined is the expectation of review.
+
+For the same reason there is no `CONTRIBUTING.md`. What a contributor would need from one
+is already load-bearing elsewhere: `make check` is what CI runs, `CLAUDE.md` states the
+ten rules and that `SPEC.md` and the golden fixtures are not to be edited, and this file
+records why each choice is what it is.
+
+`SECURITY.md` documents the trust model rather than only an address to write to, because
+three of matview's positions are easy to misread as guarantees. Recipes are code and
+registering one runs it. A database is input, and decoding a payload hands third-party
+Arrow and `.npy` parsers bytes the reader did not choose — no pickle, ever, but that is
+not the same as safety. Digests are unkeyed and detect change, not tampering. Saying so
+once, publicly, is worth more than answering it in issues.

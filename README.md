@@ -2,6 +2,12 @@
 
 Materialized views for derived values.
 
+[![CI](https://github.com/tresoldi/matview/actions/workflows/ci.yml/badge.svg)](https://github.com/tresoldi/matview/actions/workflows/ci.yml)
+[![Docs](https://github.com/tresoldi/matview/actions/workflows/docs.yml/badge.svg)](https://tresoldi.github.io/matview/)
+[![PyPI](https://img.shields.io/pypi/v/matview)](https://pypi.org/project/matview/)
+[![Python versions](https://img.shields.io/pypi/pyversions/matview)](https://pypi.org/project/matview/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Documentation: <https://tresoldi.github.io/matview/>**
 
 You declare *recipes*: functions that compute a value from parameters and from other
@@ -173,6 +179,28 @@ ruff-format and mypy at exactly the versions pinned in the `dev` extra.
 
 Documentation is MkDocs Material with an API reference generated from the docstrings:
 `make docs-serve` to preview, `make docs` to build it the way CI does (`--strict`).
+
+## Status and contributions
+
+Published for use rather than for collaboration. It is released because it is useful, and
+it is maintained for the projects that depend on it; there is no ambition to run it as a
+community project.
+
+Bug reports are welcome as [issues](https://github.com/tresoldi/matview/issues),
+especially ones with a database or a recipe that reproduces the problem. Pull requests
+may sit unreviewed — please open an issue before writing one, so you do not spend effort
+on something that will not be merged. Anything under
+[**Not in v1**](#not-in-v1) or under "Deliberately not doing" in
+[`ROADMAP.md`](ROADMAP.md) is excluded on purpose rather than for want of a patch.
+
+For anything exploitable, do not open an issue: see [`SECURITY.md`](SECURITY.md), which
+also states plainly what matview trusts — recipes are code, and a cache database from an
+untrusted source is untrusted input.
+
+## Citing
+
+[`CITATION.cff`](CITATION.cff) carries the metadata, and GitHub renders it as a "Cite this
+repository" box in the sidebar.
 
 ## License
 

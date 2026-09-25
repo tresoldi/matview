@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: If you use matview in published work, please cite it.
+title: "matview: materialized views for derived values"
+abstract: >-
+  A content-addressed compute cache over a dependency graph. Recipes declare how a value
+  is computed from parameters and from other recipes' outputs; the graph is recorded as
+  it runs rather than declared, staleness is decided by content digests rather than
+  timestamps, and results are memoized in SQLite for reuse across processes and machines.
+type: software
+authors:
+  - family-names: Tresoldi
+    given-names: Tiago
+    email: tresoldi@gmail.com
+    # orcid: https://orcid.org/0000-0000-0000-0000
+license: MIT
+repository-code: https://github.com/tresoldi/matview
+url: https://tresoldi.github.io/matview/
+keywords:
+  - cache
+  - build system
+  - dependency graph
+  - memoization
+  - reproducibility
+  - sqlite
+# version and date-released are added at the first release, and a Zenodo doi alongside
+# them; see RELEASING.md. They are absent rather than provisional, because a citation
+# file that states a release date the release did not have is worse than one that omits it.

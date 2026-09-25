@@ -142,7 +142,7 @@ uv run --extra npy   python examples/linguistics/pipeline.py    # a foreign reci
 | [`DECISIONS.md`](DECISIONS.md) | Every choice made where the spec was silent, with the reasoning. |
 | [`ROADMAP.md`](ROADMAP.md) | Candidates for future work, and what is deliberately excluded. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release notes. Note that `SPEC.md` is versioned separately and deliberately. |
-| [`ops/workflows/`](ops/workflows/) | Workflow files staged for installation under `.github/workflows/`. |
+| [`RELEASING.md`](RELEASING.md) | How a release is cut, and the account-level setup it assumes. |
 
 `tests/golden_vectors.json` and `tests/golden_codecs.json` are fixed inputs to fixed
 digests. They are the regression guard on the interoperability contract and the

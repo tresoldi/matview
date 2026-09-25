@@ -794,3 +794,31 @@ the graph-query plan concluded is in `docs/graph.md` and in D49–D54.
 work in progress: one says why the code is the way it is, the other says what is
 deliberately *not* being built, and both answer questions a user of a released library
 actually asks.
+
+## D56 — Publishing is tag-driven and credential-free
+
+A `v*` tag runs `ops/workflows/release.yml`: `make check`, a guard that the tag agrees
+with `__version__`, `make release-check`, then a trusted-publishing upload and a GitHub
+release whose notes are the changelog section for that version.
+
+Trusted publishing over an API token because the alternative is a long-lived credential
+with upload rights sitting in repository secrets, for a project with one maintainer and no
+rotation process. The cost is that the registration binds to this workflow's *filename*
+and its environment name, which is recorded in `RELEASING.md` because renaming either
+silently breaks releases.
+
+The tag-versus-`__version__` guard is not ceremony. Hatchling reads the version from
+`src/matview/__init__.py`, so a mistyped tag would otherwise publish a file whose name and
+metadata disagree, and PyPI accepts a version number exactly once.
+
+`make release-check` exists because the test suite cannot see the distribution: it imports
+an editable install, so a missing `py.typed`, an unshipped subpackage, an entry point that
+does not resolve or metadata an index would reject are all invisible to it. The target
+builds, validates the metadata, then installs the wheel in isolation and runs both an
+import and the console script.
+
+The workflow is staged under `ops/workflows/` rather than installed because pushing under
+`.github/workflows/` needs a token scope the automation account does not have. Only the
+file that does not exist yet is staged; the installed `ci.yml` and `docs.yml` are not
+copied there, since two copies of a workflow drift and the repository already refuses that
+trade for `SPEC.md`.

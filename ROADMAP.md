@@ -204,7 +204,7 @@ considered decision against that sentence, not a side effect of something else.
 ## Waiting on the repository owner
 
 `ci.yml` and `docs.yml` are installed. What is left is the account-level setup a first
-public release needs — making the repository public, the default branch rename to `main`,
+public release needs — making the repository public,
 Pages, the PyPI trusted publisher, Zenodo — and it is a checklist in
 [RELEASING.md](RELEASING.md) rather than a second copy here.
 

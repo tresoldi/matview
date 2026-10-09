@@ -114,9 +114,9 @@ and never interprets them.
 
 ## D12 — Delivery: stage by stage on one branch *(confirmed)*
 
-v1 is built in the spec's prescribed order on `claude/sleepy-planck-diq55j`, one commit
-per stage, each stage green before the next begins. The repository has no default-branch
-content, so there is nothing to merge into yet and no PR is opened until asked.
+v1 is built in the spec's prescribed order on `claude/sleepy-planck-diq55j` (since renamed `main`), one commit
+per stage, each stage green before the next begins. The repository had no default-branch
+content at the time, so there was nothing to merge into and no PR was opened until asked.
 
 ## D13 — Foreign manifest `${...}` substitutes typed scalars, interpolates otherwise *(confirmed)*
 

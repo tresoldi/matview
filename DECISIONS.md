@@ -787,7 +787,7 @@ something that shipped is worse than no plan at all.
 
 They are removed rather than moved under `docs/`, because git history keeps them and the
 reasoning worth keeping outlived them: the ten rules and their test names are in
-`CLAUDE.md`, the measurements from the 250k plan are in `docs/performance.md`, and what
+`AGENTS.md`, the measurements from the 250k plan are in `docs/performance.md`, and what
 the graph-query plan concluded is in `docs/graph.md` and in D49–D54.
 
 `DECISIONS.md` and `ROADMAP.md` stay at the root and stay public. They are not records of
@@ -832,7 +832,7 @@ an unanswered pull request costs a contributor more than a stated policy does. B
 are still wanted; what is declined is the expectation of review.
 
 For the same reason there is no `CONTRIBUTING.md`. What a contributor would need from one
-is already load-bearing elsewhere: `make check` is what CI runs, `CLAUDE.md` states the
+is already load-bearing elsewhere: `make check` is what CI runs, `AGENTS.md` states the
 ten rules and that `SPEC.md` and the golden fixtures are not to be edited, and this file
 records why each choice is what it is.
 

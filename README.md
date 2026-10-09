@@ -31,7 +31,7 @@ def sma(ctx, *, symbol: str, window: int, interval: str = "1d"):
     bars = ctx.get("ohlcv", symbol=symbol, interval=interval)
     return bars["close"].rolling_mean(window)
 
-cache = Cache(store=SqliteStore("argos.db"))
+cache = Cache(store=SqliteStore("cache.db"))
 cache.get("sma", symbol="AAPL", window=200)
 ```
 
@@ -51,6 +51,10 @@ This is a build system for data rather than files, in the sense of *Build System
 Carte* (Mokhov, Mitchell, Peyton Jones): a suspending scheduler with constructive traces.
 
 ## Install
+
+Not yet published to PyPI (`0.1.0` is the unreleased first version, see [`CHANGELOG.md`](CHANGELOG.md)), so the
+`pip install` lines below work only once it is released; until then install from a checkout
+(`uv pip install -e .`), as Pharos does with a path dependency.
 
 ```bash
 pip install matview              # core: SQLite and the json codec, nothing heavy
@@ -181,6 +185,9 @@ Documentation is MkDocs Material with an API reference generated from the docstr
 `make docs-serve` to preview, `make docs` to build it the way CI does (`--strict`).
 
 ## Status and contributions
+
+matview is the cache foundation of [Pharos](https://github.com/tresoldi/pharos) (daily-swing alerts), which depends
+on it and registers its finance recipes into a caller-owned `Registry`.
 
 Published for use rather than for collaboration. It is released because it is useful, and
 it is maintained for the projects that depend on it; there is no ambition to run it as a

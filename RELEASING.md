@@ -15,7 +15,8 @@ These need repository or account access, so they are not things the automation a
 can do. Nothing below has to be repeated per release.
 
 - [ ] Make the repository public.
-- [ ] Rename the default branch to `main`. Several things already assume it: the docs
+- [ ] Rename the default branch to `main`. (As of 2026-10 the only branch, and the GitHub default, is
+      `claude/sleepy-planck-diq55j`; the docs deploy and the links below therefore do not fire or resolve yet.) Several things already assume it: the docs
       workflow deploys only from `main`, `mkdocs.yml` points `edit_uri` at `edit/main`,
       and the `Changelog` URL in `pyproject.toml` points at `blob/main`.
 - [ ] **Settings → Pages → Source: GitHub Actions.** Until this is set the docs build

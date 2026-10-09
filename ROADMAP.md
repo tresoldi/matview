@@ -94,9 +94,9 @@ What the baseline leaves open: `plan_many` runs at 291 roots/s against `get_many
 
 ### A CLI — done
 
-`matview ls`, `plan`, `show`, `gc`, `drop`, `stats`. A cache that cannot be inspected
-from a terminal is hard to trust. argos already uses typer, so there is a house pattern
-to follow. The one design problem is that any CLI must import the caller's recipe
+`matview info`, `ls`, `show`, `stats`, `verify`, `cat`, `plan`, plus the graph queries `lineage`, `impact`
+and `cost`. All read-only; `gc` and `drop` were not built and stay on `Cache` (`impact --drop`
+shows what a drop would do). A cache that cannot be inspected from a terminal is hard to trust. The one design problem is that any CLI must import the caller's recipe
 modules to know the registry, so it needs a `--recipes` argument or a config key.
 
 ### Property-based tests for canonicalization
@@ -114,7 +114,7 @@ turns that file from a regression test into an actual cross-language contract.
 
 ### An `arrow-pandas` codec — done
 
-argos, the first intended consumer, is pandas + pyarrow + duckdb; the `arrow` codec
+argos, the first intended consumer (since retired; Pharos is the live one), is pandas + pyarrow + duckdb; the `arrow` codec
 decodes to polars. Built, and the byte-identity claim turned out to need work first: the
 Arrow offset width was being chosen by whichever library produced the table, so identical
 data hashed differently under polars and pandas 2.2. Normalizing it (D39) made the claim
@@ -192,7 +192,7 @@ And one item the spec defers rather than excludes:
 - **A declared lookback window,** so that appending one observation avoids rebuilding a
   full history. The spec says the decision waits for a real workload to measure, and
   rests on `compute_ms`, which is recorded faithfully. Build nothing toward it until
-  argos has produced numbers.
+  a consumer (argos was the intended one; now Pharos) has produced numbers.
 
 Parallel execution of independent roots is not on the spec's exclusion list, but the
 scheduler is deliberately plain recursion — "graph depth in practice is single digits,

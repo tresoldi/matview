@@ -20,7 +20,7 @@ def sma(ctx, *, symbol: str, window: int, interval: str = "1d"):
     bars = ctx.get("ohlcv", symbol=symbol, interval=interval)
     return bars["close"].rolling_mean(window)
 
-cache = Cache(store=SqliteStore("argos.db"))
+cache = Cache(store=SqliteStore("cache.db"))
 cache.get("sma", symbol="AAPL", window=200)
 ```
 

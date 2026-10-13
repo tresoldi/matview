@@ -4,8 +4,8 @@ Materialized views for derived values.
 
 [![CI](https://github.com/tresoldi/matview/actions/workflows/ci.yml/badge.svg)](https://github.com/tresoldi/matview/actions/workflows/ci.yml)
 [![Docs](https://github.com/tresoldi/matview/actions/workflows/docs.yml/badge.svg)](https://tresoldi.github.io/matview/)
-[![PyPI](https://img.shields.io/pypi/v/matview)](https://pypi.org/project/matview/)
-[![Python versions](https://img.shields.io/pypi/pyversions/matview)](https://pypi.org/project/matview/)
+[![PyPI](https://img.shields.io/pypi/v/matview-cache)](https://pypi.org/project/matview-cache/)
+[![Python versions](https://img.shields.io/pypi/pyversions/matview-cache)](https://pypi.org/project/matview-cache/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Documentation: <https://tresoldi.github.io/matview/>**
@@ -53,11 +53,11 @@ Carte* (Mokhov, Mitchell, Peyton Jones): a suspending scheduler with constructiv
 ## Install
 
 ```bash
-pip install matview              # core: SQLite and the json codec, nothing heavy
-pip install 'matview[arrow]'     # polars DataFrames and Series via Arrow IPC
-pip install 'matview[pandas]'    # the same Arrow bytes, decoded to pandas
-pip install 'matview[npy]'       # numpy arrays
-pip install 'matview[all]'
+pip install matview-cache            # core: SQLite and the json codec, nothing heavy
+pip install 'matview-cache[arrow]'   # polars DataFrames and Series via Arrow IPC
+pip install 'matview-cache[pandas]'  # the same Arrow bytes, decoded to pandas
+pip install 'matview-cache[npy]'     # numpy arrays
+pip install 'matview-cache[all]'
 ```
 
 matview requires SQLite with JSON1. SQLite 3.38 or newer includes JSON1 by default;

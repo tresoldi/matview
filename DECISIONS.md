@@ -20,10 +20,12 @@ and `ExceptionGroup`, which fits batched miss reporting. Supporting 3.10 costs a
 
 Licensed MIT (confirmed).
 
-Distribution name `matview`, import name `matview` (spec fixes both). The name is
-unregistered on PyPI as of 2026-09-18. Codecs ship as extras: `matview[arrow]`,
-`matview[npy]`, `matview[json]` (json is stdlib-only and therefore always available;
-the extra exists only so the three read symmetrically), plus `matview[all]`.
+Distribution name `matview-cache`, import name `matview`. The distribution name changed
+from `matview` when PyPI rejected that for colliding with the existing `mat-view` — see
+D58. The import name, which the spec's examples use, is unchanged. Codecs ship as extras:
+`matview-cache[arrow]`, `matview-cache[npy]`, `matview-cache[json]` (json is stdlib-only
+and therefore always available; the extra exists only so the three read symmetrically),
+plus `matview-cache[all]`.
 
 ## D3 — JCS comes from the `rfc8785` package, not a hand-rolled serializer *(confirmed)*
 
@@ -841,3 +843,17 @@ registering one runs it. A database is input, and decoding a payload hands third
 Arrow and `.npy` parsers bytes the reader did not choose — no pickle, ever, but that is
 not the same as safety. Digests are unkeyed and detect change, not tampering. Saying so
 once, publicly, is worth more than answering it in issues.
+
+## D58 — The PyPI distribution is `matview-cache`; the import stays `matview`
+
+PyPI refuses a name whose `ultranormalize()` form matches an existing project's:
+lowercase, strip `.`, `_` and `-`, then map `l/L/i/I` to `1` and `o/O` to `0`. `matview`
+and the existing `mat-view` both normalize to `matv1ew`, so the pending trusted publisher
+was rejected. `matview-cache` normalizes to `matv1ewcache`, which collides with nothing in
+the index.
+
+Only the distribution name changes. The import package, the console script, the
+repository and the documentation site all stay `matview`: the import name is the API, and
+a distribution name that differs from the import name is ordinary (`beautifulsoup4`/
+`bs4`, `pillow`/`PIL`). `pyproject.toml`, the README, `docs/index.md`, the `[all]` extra's
+self-reference and the codec error message are the only places that name it for users.

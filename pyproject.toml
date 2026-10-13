@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "matview"
+name = "matview-cache"
 dynamic = ["version"]
 description = "Materialized views for derived values: a content-addressed compute cache over a dependency graph."
 readme = "README.md"
@@ -49,7 +49,7 @@ arrow = ["polars>=1.20", "pyarrow>=16.0"]
 pandas = ["pandas>=2.2", "pyarrow>=16.0"]
 npy = ["numpy>=1.26"]
 json = []
-all = ["matview[arrow,pandas,npy,json]"]
+all = ["matview-cache[arrow,pandas,npy,json]"]
 # Documentation site.
 docs = [
   # Upper-bounded deliberately: MkDocs 2.0 removes the plugin system and the theming

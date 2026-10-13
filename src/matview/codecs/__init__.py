@@ -142,7 +142,7 @@ def get_codec(name: str) -> Codec:
     except ImportError as exc:
         extra = _EXTRAS.get(name, name)
         raise CodecUnavailable(
-            f"codec {name!r} needs its optional extra: pip install 'matview[{extra}]' ({exc})"
+            f"codec {name!r} needs its optional extra: pip install 'matview-cache[{extra}]' ({exc})"
         ) from exc
 
     if name not in _REGISTRY:  # pragma: no cover - a builtin module that failed to register

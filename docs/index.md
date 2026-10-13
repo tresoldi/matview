@@ -38,11 +38,11 @@ Carte* (Mokhov, Mitchell, Peyton Jones): a suspending scheduler with constructiv
 ## Install
 
 ```bash
-pip install matview              # core: SQLite and the json codec, nothing heavy
-pip install 'matview[arrow]'     # polars DataFrames and Series via Arrow IPC
-pip install 'matview[pandas]'    # the same Arrow bytes, decoded to pandas
-pip install 'matview[npy]'       # numpy arrays
-pip install 'matview[all]'
+pip install matview-cache            # core: SQLite and the json codec, nothing heavy
+pip install 'matview-cache[arrow]'   # polars DataFrames and Series via Arrow IPC
+pip install 'matview-cache[pandas]'  # the same Arrow bytes, decoded to pandas
+pip install 'matview-cache[npy]'     # numpy arrays
+pip install 'matview-cache[all]'
 ```
 
 matview requires SQLite with JSON1. SQLite 3.38 or newer includes JSON1 by default;

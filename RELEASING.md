@@ -28,8 +28,9 @@ can do. Nothing below has to be repeated per release.
       The release workflow names them, and an environment is what lets you require a
       manual approval before an upload if you ever want one.
 - [ ] Register the trusted publisher on <https://pypi.org/manage/account/publishing/>:
-      owner `tresoldi`, repository `matview`, workflow `release.yml`, environment `pypi`.
-      Repeat on <https://test.pypi.org> with environment `testpypi`. This is what makes
+      PyPI project `matview-cache`, owner `tresoldi`, repository `matview`, workflow
+      `release.yml`, environment `pypi`. Repeat on <https://test.pypi.org> with
+      environment `testpypi`. This is what makes
       publishing credential-free; there is no API token to store or rotate. The
       registration is bound to the workflow *filename*, so renaming the file breaks it.
 - [ ] **Settings → Security → enable private vulnerability reporting.** `SECURITY.md`
@@ -57,7 +58,7 @@ can do. Nothing below has to be repeated per release.
    `git push origin main --follow-tags`.
 7. The tag runs the release workflow: checks, the tag-versus-`__version__` guard, build,
    publish, and a GitHub release whose notes are the changelog section.
-8. Confirm the result from the outside: `uv run --no-project --with matview==x.y.z
+8. Confirm the result from the outside: `uv run --no-project --with matview-cache==x.y.z
    matview --version` installs from the index rather than the working tree.
 
 ## Dry run

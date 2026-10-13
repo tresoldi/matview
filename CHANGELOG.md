@@ -12,7 +12,9 @@ changes only by bumping that number — never as part of an ordinary release.
 
 ## [Unreleased]
 
-First working version, not yet published. Will be released as 0.1.0.
+## [0.1.0] — 2026-10-13
+
+First release.
 
 ### Added
 

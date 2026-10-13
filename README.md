@@ -52,10 +52,6 @@ Carte* (Mokhov, Mitchell, Peyton Jones): a suspending scheduler with constructiv
 
 ## Install
 
-Not yet published to PyPI (`0.1.0` is the unreleased first version, see [`CHANGELOG.md`](CHANGELOG.md)), so the
-`pip install` lines below work only once it is released; until then install from a checkout
-(`uv pip install -e .`), as Pharos does with a path dependency.
-
 ```bash
 pip install matview              # core: SQLite and the json codec, nothing heavy
 pip install 'matview[arrow]'     # polars DataFrames and Series via Arrow IPC

@@ -22,6 +22,7 @@ keywords:
   - memoization
   - reproducibility
   - sqlite
-# version and date-released are added at the first release, and a Zenodo doi alongside
-# them; see RELEASING.md. They are absent rather than provisional, because a citation
-# file that states a release date the release did not have is worse than one that omits it.
+version: 0.1.0
+date-released: 2026-10-13
+# A Zenodo doi is added here once the archive assigns one at the first tag; see
+# RELEASING.md.

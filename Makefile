@@ -69,7 +69,10 @@ test-cov:  ## Run the suite with coverage
 # layers it in, editable .pth and all, so a *local* run is not a true isolation check and
 # can mask a missing dependency. CI has no .venv, so it is the authority for this one.
 codec-floor:  ## Check the golden codec bytes under the oldest supported libraries
-	uv run --no-project --refresh-package matview --with . \
+	# Pinned to 3.11: pyarrow 16.1.0 has no wheel for newer interpreters, so on a machine
+	# whose default Python is 3.13+ uv falls back to a source build that fails. CI already
+	# runs this job on 3.11, so the pin only makes the local run match it.
+	uv run --python 3.11 --no-project --refresh-package matview --with . \
 		--with 'polars==1.20.0' --with 'pyarrow==16.1.0' --with 'numpy==1.26.4' \
 		--with 'pandas==2.2.3' --with 'pytest>=8.0' \
 		python -m pytest tests/test_codecs.py -q

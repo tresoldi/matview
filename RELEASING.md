@@ -20,13 +20,10 @@ can do. Nothing below has to be repeated per release.
       and the `Changelog` URL in `pyproject.toml` points at `blob/main`.
 - [ ] **Settings → Pages → Source: GitHub Actions.** Until this is set the docs build
       passes and the deploy step fails, which is easy to misread as a broken site build.
-- [ ] Install [`ops/workflows/release.yml`](ops/workflows/release.yml) as
-      `.github/workflows/release.yml`. It is staged rather than installed because
-      pushing a file under `.github/workflows/` needs a token scope the automation
-      account does not have.
-- [ ] Add `"3.14"` to the matrix in `.github/workflows/ci.yml`. Verified locally: the
-      full suite with every codec extra passes on 3.14, and the golden codec fixtures
-      match, so this is a metadata catch-up rather than a port.
+- [x] Install the release workflow as `.github/workflows/release.yml` (done 2026-10).
+- [x] Add `"3.14"` to the matrix in `.github/workflows/ci.yml` (done 2026-10). Verified
+      locally: the full suite with every codec extra passes on 3.14, and the golden codec
+      fixtures match.
 - [ ] Create the `pypi` and `testpypi` environments under **Settings → Environments**.
       The release workflow names them, and an environment is what lets you require a
       manual approval before an upload if you ever want one.

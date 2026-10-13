@@ -203,12 +203,8 @@ considered decision against that sentence, not a side effect of something else.
 
 ## Waiting on the repository owner
 
-`ci.yml` and `docs.yml` are installed. What is left is the account-level setup a first
-public release needs — making the repository public,
-Pages, the PyPI trusted publisher, Zenodo — and it is a checklist in
-[RELEASING.md](RELEASING.md) rather than a second copy here.
-
-One item is still a hand-off for the same reason as before: a file under
-`.github/workflows/` cannot be pushed by the automation account, so
-`ops/workflows/release.yml` is staged for installation and the Python 3.14 line of the CI
-matrix has to be added by hand.
+The repository is public, and Pages, the `pypi`/`testpypi` environments and private
+vulnerability reporting are configured. What is left needs the PyPI and Zenodo accounts
+directly and cannot be automated from here: registering the trusted publisher on PyPI and
+TestPyPI, and authorizing Zenodo before the first tag. Both are on the checklist in
+[RELEASING.md](RELEASING.md) rather than copied here.

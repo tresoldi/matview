@@ -797,7 +797,7 @@ actually asks.
 
 ## D56 — Publishing is tag-driven and credential-free
 
-A `v*` tag runs `ops/workflows/release.yml`: `make check`, a guard that the tag agrees
+A `v*` tag runs `.github/workflows/release.yml`: `make check`, a guard that the tag agrees
 with `__version__`, `make release-check`, then a trusted-publishing upload and a GitHub
 release whose notes are the changelog section for that version.
 
@@ -817,11 +817,10 @@ does not resolve or metadata an index would reject are all invisible to it. The 
 builds, validates the metadata, then installs the wheel in isolation and runs both an
 import and the console script.
 
-The workflow is staged under `ops/workflows/` rather than installed because pushing under
-`.github/workflows/` needs a token scope the automation account does not have. Only the
-file that does not exist yet is staged; the installed `ci.yml` and `docs.yml` are not
-copied there, since two copies of a workflow drift and the repository already refuses that
-trade for `SPEC.md`.
+The workflow is installed at `.github/workflows/release.yml`. It was staged under `ops/`
+until an account with the `workflow` scope could push it, because pushing under
+`.github/workflows/` needs that scope. There is now one copy, not two — the same reason
+`ci.yml` and `docs.yml` are not duplicated and `SPEC.md` is not copied into `docs/`.
 
 ## D57 — Published for use, not for collaboration, and the security posture says what it trusts
 
